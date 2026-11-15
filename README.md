@@ -11,22 +11,22 @@ Demo (local): [http://localhost:3000](http://localhost:3000)
 ## The problem
 
 Monsoon rainfall and climate risk are often locked behind charts, dashboards, and jargon.
-In places like **Kathmandu**, families, students, journalists, and emergency planners need a faster gut-check:
+People anywhere — Kathmandu flood season, Miami storm week, Tokyo wet day — need a faster gut-check:
 
-> Is rainfall rising? How unusual is this season against the planetary warming story?
+> How wet is *this place* right now? How does that sit against planetary warming?
 
 Sight-only tools also shut out people who learn better by listening — or who cannot easily read dense visual dashboards.
 
 ## The solution
 
-**Earth Information Jukebox** pairs official **NASA Earth Information Center (EIC)** visualizations with **real-time sonification** of NASA observation data, plus a short spoken answer.
+**Earth Information Jukebox** pairs official **NASA Earth Information Center (EIC)** visualizations with **on-the-fly sonification** of NASA observation data, plus a short spoken answer.
 
 1. An EIC / SVS science frame fills the screen (not stock photography).
-2. NASA POWER rainfall/temperature for Kathmandu drives a rain soundscape.
+2. Name any place → geocode → NASA POWER point rainfall/temperature → rain soundscape **only if precip > 0** (dry day → calm cue, not fake rain).
 3. NASA GISTEMP v4 global temperature anomaly drives a pitch-mapped tone.
 4. Ask or Talk: Gemini narrates the numbers (with a local NASA fallback if Gemini is overloaded).
 
-That is the challenge brief, solved for a concrete human need: **hearing water risk and climate context together**.
+That is the challenge brief, solved for a concrete human need: **ask anywhere, hear honest Earth numbers**.
 
 ## Why this can win
 
@@ -54,15 +54,15 @@ Full citations and eligibility notes: **[`DATASETS.md`](./DATASETS.md)**
 ## Demo script (for judges)
 
 1. Open Chrome → `http://localhost:3000`
-2. Click **Hear Kathmandu monsoon rain**  
-   - EIC atmospheric-river frame stays on screen  
-   - Rain noise maps to POWER precipitation  
+2. Click **Hear Kathmandu rain** or **Hear Tokyo rain**  
+   - Place is geocoded on the fly → NASA POWER for that lat/lon  
+   - Rain noise only if mm/day > 0; otherwise a dry-day calm cue  
    - One short spoken summary (no double-talk)
-3. Ask: `Kathmandu rain on November 10` or `Kathmandu rainfall yesterday`  
+3. Ask any place/date: `rain in Miami` · `Pokhara yesterday` · `Tokyo rain on November 10`  
    - Dated POWER query; UI explains lag / nearest available day
 4. Click **Hear global warming tone**  
    - GISTEMP anomaly → pitch
-5. Optional: **Talk** → say `Kathmandu rainfall` (Chrome mic)
+5. Optional: **Talk** → say `rain in London` (Chrome mic)
 
 ## How to run
 

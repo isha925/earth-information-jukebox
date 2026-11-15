@@ -60,6 +60,22 @@ async function main() {
     ok("power-dated", `${dated.json.date} rain=${dated.json.rainfall}`);
   }
 
+  if (!/Kathmandu/i.test(power.json.location?.label || power.json.location?.name || "")) {
+    fail("power-default-place", JSON.stringify(power.json.location));
+  } else {
+    ok("power-default-place", power.json.location.label);
+  }
+
+  const tokyo = await getJson("/api/nasa-weather?place=Tokyo");
+  if (!/Tokyo/i.test(tokyo.json.location?.name || "") || typeof tokyo.json.rainfall !== "number") {
+    fail("power-tokyo", JSON.stringify(tokyo.json));
+  } else {
+    ok(
+      "power-tokyo",
+      `${tokyo.json.location.label} rain=${tokyo.json.rainfall} lat=${tokyo.json.location.lat}`
+    );
+  }
+
   const gistemp = await getJson("/api/gistemp");
   if (typeof gistemp.json.anomalyC !== "number") fail("gistemp", JSON.stringify(gistemp.json));
   else ok("gistemp", `${gistemp.json.latestYear} => ${gistemp.json.anomalyC} C`);

@@ -2,9 +2,9 @@
 
 This project targets **NASA Space Apps 2026 — The Earth Information Jukebox**.
 
-**Human problem we attach to the brief:** monsoon / flood awareness for **Kathmandu** —
-people who need a fast, accessible gut-check on rainfall and planetary warming, not another
-dense chart.
+**Human problem we attach to the brief:** rainfall / flood awareness for **any place you name**
+(Kathmandu monsoon is the motivating civic example) — geocode on the fly, pull NASA POWER for
+that point, and sonify honestly (0 mm ≠ rain sound).
 
 Challenge intent: pair **NASA Earth Information Center (EIC) visual frames** with
 **real-time sonification** driven by NASA Earth science data.
@@ -24,7 +24,7 @@ That would break the challenge brief.
 
 | Dataset | Parameters used | Access | Role in app |
 | --- | --- | --- | --- |
-| NASA POWER Agroclimatology API | `PRECTOTCORR`, `T2M` daily point for Kathmandu | No key | Local rainfall/temperature sonification paired with the atmospheric-river EIC frame |
+| NASA POWER Agroclimatology API | `PRECTOTCORR`, `T2M` daily point for any geocoded lat/lon | No key | On-the-fly local rainfall/temperature sonification paired with the atmospheric-river EIC frame |
 | NASA GISS GISTEMP v4 | Annual global anomaly (`J-D`) from `GLB.Ts+dSST.csv` | No key | Global temperature sonification for the EIC climate theme |
 
 Endpoints:

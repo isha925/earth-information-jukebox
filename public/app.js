@@ -3,8 +3,10 @@ const askForm = document.getElementById("askForm");
 const askInput = document.getElementById("askInput");
 const askButton = document.getElementById("askButton");
 const kathmanduBtn = document.getElementById("kathmanduBtn");
+const tokyoBtn = document.getElementById("tokyoBtn");
 const gistempBtn = document.getElementById("gistempBtn");
 const stopAudioBtn = document.getElementById("stopAudioBtn");
+const placeQuickButtons = [kathmanduBtn, tokyoBtn].filter(Boolean);
 const statusMessage = document.getElementById("statusMessage");
 const paMessage = document.getElementById("paMessage");
 const dataDisplay = document.getElementById("dataDisplay");
@@ -85,7 +87,7 @@ function setBusy() {
 
   // Only block Ask/quick actions while the PA is working.
   // Listening must not freeze the rest of the UI if mic recognition stalls.
-  [askButton, kathmanduBtn, gistempBtn].forEach((el) => {
+  [askButton, gistempBtn, ...placeQuickButtons].forEach((el) => {
     if (el) {
       el.disabled = thinking;
     }
@@ -220,9 +222,46 @@ function setEicFrame(frameUrl, citation, label) {
   }
 }
 
+function isDryPrecipitation(rainMm) {
+  // NASA POWER PRECTOTCORR at 0 mm/day means no measurable rain —
+  // never sonify that as rainfall.
+  return !(Number(rainMm) > 0);
+}
+
+async function playDryDayCue() {
+  const ctx = await ensureAudio();
+  stopActiveAudio();
+
+  // Soft open fifth — calm / dry, deliberately not rain noise.
+  const now = ctx.currentTime;
+  for (const [freq, delay, peak] of [
+    [196, 0, 0.12],
+    [294, 0.08, 0.1]
+  ]) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    gain.gain.value = 0.0001;
+    gain.gain.exponentialRampToValueAtTime(peak, now + delay + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + delay + 1.4);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now + delay);
+    osc.stop(now + delay + 1.5);
+    activeNodes.push(osc);
+  }
+}
+
 async function playRainSoundscape(rainMm) {
   const ctx = await ensureAudio();
   stopActiveAudio();
+
+  const mm = Math.max(0, Number(rainMm) || 0);
+  if (isDryPrecipitation(mm)) {
+    await playDryDayCue();
+    return;
+  }
 
   const bufferSize = ctx.sampleRate * 2;
   const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
@@ -237,11 +276,13 @@ async function playRainSoundscape(rainMm) {
 
   const filter = ctx.createBiquadFilter();
   filter.type = "bandpass";
-  filter.frequency.value = Math.max(400, Math.min(rainMm * 280 + 500, 4200));
+  // Louder / brighter rain maps to higher precipitation.
+  filter.frequency.value = Math.min(500 + mm * 280, 4200);
   filter.Q.value = 1.4;
 
   rainGainNode = ctx.createGain();
-  const peak = Math.min(Math.max(0.35 + rainMm / 20, 0.35), 0.9);
+  // Gain scales with mm — no artificial floor that invents rain on dry days.
+  const peak = Math.min(0.18 + mm / 18, 0.9);
   rainGainNode.gain.value = peak;
 
   activeNoiseNode.connect(filter);
@@ -257,7 +298,7 @@ async function playRainSoundscape(rainMm) {
 
   rainStopTimer = setTimeout(() => {
     stopActiveAudio();
-    if (statusMessage && /soundscape playing/i.test(statusMessage.textContent || "")) {
+    if (statusMessage && /soundscape playing|Playing rain/i.test(statusMessage.textContent || "")) {
       statusMessage.textContent = "Rain soundscape finished.";
     }
   }, RAIN_DURATION_SEC * 1000 + 50);
@@ -300,16 +341,27 @@ async function applySonify(sonify) {
 
   if (sonify.type === "power-rain") {
     const niceDate = formatNasaDate(sonify.date);
+    const rainMm = Number(sonify.rainfallMm) || 0;
+    const dry = isDryPrecipitation(rainMm);
+    const placeLabel = sonify.placeLabel || sonify.place || "Selected place";
     const note = sonify.availabilityNote
       ? `<br><span class="avail">${sonify.availabilityNote}</span>`
       : "";
+    const soundNote = dry
+      ? `<br><span class="avail">Dry day (0 mm) — calm cue, not rain noise.</span>`
+      : "";
+    const coords =
+      sonify.lat != null && sonify.lon != null
+        ? `<br><span class="avail">${Number(sonify.lat).toFixed(2)}°, ${Number(sonify.lon).toFixed(2)}°</span>`
+        : "";
     dataDisplay.innerHTML =
-      `<strong>NASA POWER · Kathmandu</strong><br>` +
-      `Precipitation: <strong>${Number(sonify.rainfallMm).toFixed(2)} mm/day</strong><br>` +
+      `<strong>NASA POWER · ${placeLabel}</strong><br>` +
+      `Precipitation: <strong>${rainMm.toFixed(2)} mm/day</strong>` +
+      `${dry ? " · no measurable rain" : ""}<br>` +
       `Temperature: <strong>${Number(sonify.temperatureC).toFixed(1)} °C</strong><br>` +
-      `Date: <strong>${niceDate}</strong>${note}`;
-    setIntensity(Math.min((Number(sonify.rainfallMm) || 0) / 20, 1));
-    await playRainSoundscape(Number(sonify.rainfallMm) || 0);
+      `Date: <strong>${niceDate}</strong>${coords}${note}${soundNote}`;
+    setIntensity(dry ? 0.08 : Math.min(rainMm / 20, 1));
+    await playRainSoundscape(rainMm);
   }
 
   if (sonify.type === "gistemp") {
@@ -334,7 +386,7 @@ async function loadDefaultTrack() {
         `EIC visual: ${track.title || track.id} · SVS science frame`
       );
       dataDisplay.textContent =
-        "Click “Hear Kathmandu monsoon rain”, or Talk and say “Kathmandu rainfall”.";
+        "Ask any city (rain in Tokyo), tap a quick place, or Talk and say a place name.";
       setIntensity(0.12);
     }
   } catch (error) {
@@ -380,16 +432,55 @@ function extractRequestedDate(question) {
   return null;
 }
 
+function extractPlaceFromQuestion(question) {
+  let text = String(question || "");
+  text = text
+    .replace(/\b(20\d{2})[-/]?(\d{2})[-/]?(\d{2})\b/gi, " ")
+    .replace(
+      /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+\d{1,2}(?:,?\s*20\d{2})?\b/gi,
+      " "
+    )
+    .replace(/\b(yesterday|today|tomorrow|now|current|latest|last\s+week)\b/gi, " ");
+
+  const patterns = [
+    /\b(?:rain|rainfall|precip(?:itation)?|weather|climate|temperature|monsoon|flood)\s+(?:in|for|at|around|near)\s+(.+)$/i,
+    /\b(?:in|for|at|around|near)\s+(.+?)\s+(?:rain|rainfall|precip(?:itation)?|weather|climate|temperature|monsoon)\b/i,
+    /^(.+?)\s+(?:rain|rainfall|precip(?:itation)?|weather|monsoon|flood)\b/i,
+    /\b(?:rain|rainfall|precip(?:itation)?|weather|monsoon)\s+(.+)$/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      const cleaned = match[1]
+        .replace(/\b(please|tell me|about|the|a|an)\b/gi, " ")
+        .replace(/[?!.]+$/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (cleaned.length >= 2) {
+        return cleaned;
+      }
+    }
+  }
+  return null;
+}
+
 async function playNasaDirect(kind, question = "") {
   if (kind === "rain") {
     const date = extractRequestedDate(question);
-    const qs = date ? `?date=${encodeURIComponent(date)}` : "";
-    const response = await fetch(`/api/nasa-weather${qs}`);
+    const place = extractPlaceFromQuestion(question) || "Kathmandu";
+    const params = new URLSearchParams();
+    if (date) {
+      params.set("date", date);
+    }
+    params.set("place", place);
+    const response = await fetch(`/api/nasa-weather?${params.toString()}`);
     const data = await response.json();
     if (!response.ok || data.error) {
       throw new Error(data.error || "NASA POWER failed");
     }
     const niceDate = formatNasaDate(data.date);
+    const placeLabel = data.location?.label || data.location?.name || place;
     const sonify = {
       type: "power-rain",
       rainfallMm: data.rainfall,
@@ -398,14 +489,21 @@ async function playNasaDirect(kind, question = "") {
       requestedDate: data.requestedDate,
       selection: data.selection,
       availabilityNote: data.availabilityNote,
+      place: data.location?.name,
+      placeLabel,
+      lat: data.location?.lat,
+      lon: data.location?.lon,
       trackId: data.trackId,
       frameUrl: data.eicPairing?.frameUrl,
       citation: data.source?.citation
     };
     // One short spoken line only — chat must not speak a second overlapping summary.
-    const reply =
-      `For Kathmandu on ${niceDate}, rainfall was ${Number(data.rainfall).toFixed(1)} ` +
-      `millimeters per day, temperature around ${Number(data.temperatureC).toFixed(0)} degrees Celsius.`;
+    const rainMm = Number(data.rainfall) || 0;
+    const reply = isDryPrecipitation(rainMm)
+      ? `For ${placeLabel} on ${niceDate}, NASA POWER shows no measurable rainfall — zero millimeters per day — ` +
+        `with air temperature around ${Number(data.temperatureC).toFixed(0)} degrees Celsius. Soft dry cue only; not rain.`
+      : `For ${placeLabel} on ${niceDate}, rainfall was ${rainMm.toFixed(1)} ` +
+        `millimeters per day, temperature around ${Number(data.temperatureC).toFixed(0)} degrees Celsius.`;
     paMessage.textContent = reply;
     await applySonify(sonify);
     return { reply, sonify, spoke: false };
@@ -448,22 +546,27 @@ async function askPA(question) {
   await playUnlockChirp();
 
   const lower = trimmed.toLowerCase();
-  const wantsRain =
-    lower.includes("kathmandu") ||
-    lower.includes("rain") ||
-    lower.includes("precip") ||
-    lower.includes("weather");
   const wantsTemp =
     lower.includes("global temperature") ||
     lower.includes("gistemp") ||
-    lower.includes("warming") ||
-    lower.includes("climate");
+    (lower.includes("warming") && !lower.includes("rain"));
+  const wantsRain =
+    !wantsTemp &&
+    (lower.includes("rain") ||
+      lower.includes("precip") ||
+      lower.includes("weather") ||
+      lower.includes("monsoon") ||
+      Boolean(extractPlaceFromQuestion(trimmed)));
 
   let direct = null;
   try {
     if (wantsRain) {
       direct = await playNasaDirect("rain", trimmed);
-      statusMessage.textContent = `Playing rain (~${RAIN_DURATION_SEC}s). Fetching spoken summary…`;
+      const dry = isDryPrecipitation(direct?.sonify?.rainfallMm);
+      const where = direct?.sonify?.placeLabel || "place";
+      statusMessage.textContent = dry
+        ? `Dry day in ${where} (0 mm) — calm cue, not rain. Fetching spoken summary…`
+        : `Playing rain for ${where} (~${RAIN_DURATION_SEC}s). Fetching spoken summary…`;
     } else if (wantsTemp) {
       direct = await playNasaDirect("temp", trimmed);
       statusMessage.textContent = "Playing temperature tone. Fetching spoken summary…";
@@ -691,7 +794,10 @@ talkButton.addEventListener("click", () => {
   startTalking();
 });
 
-[kathmanduBtn, gistempBtn].forEach((button) => {
+[kathmanduBtn, tokyoBtn, gistempBtn].forEach((button) => {
+  if (!button) {
+    return;
+  }
   button.addEventListener("click", () => {
     const question = button.getAttribute("data-question");
     if (question) {

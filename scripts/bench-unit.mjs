@@ -76,6 +76,18 @@ if (!/Stopped listening|Starting microphone|Listening…/.test(appJs)) {
   ok("talk-ux-copy");
 }
 
+if (!/function isDryPrecipitation/.test(appJs) || !/function playDryDayCue/.test(appJs)) {
+  fail("dry-day-sonify", "0 mm must not play rain noise");
+} else {
+  ok("dry-day-sonify", "dry cue when precip <= 0");
+}
+
+if (!/extractPlaceFromQuestion|place=/.test(appJs)) {
+  fail("any-place", "on-the-fly place query missing");
+} else {
+  ok("any-place", "place passed to POWER");
+}
+
 if (failures.length) {
   console.error(`\n${failures.length} unit failure(s)`);
   process.exit(1);

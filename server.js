@@ -56,8 +56,9 @@ Every reply is read aloud by text-to-speech, so:
 - Write numbers and units the way they are spoken, for example "twenty millimeters per day".
 
 When NASA observation context is provided in the user message, treat it as ground truth and explain it clearly.
-Prefer NASA POWER precipitation or temperature for local weather questions, and GISTEMP for global temperature trends.
-If no live numbers are provided, say so briefly and invite the listener to ask about Kathmandu rainfall or global temperature.`;
+Prefer NASA POWER precipitation or temperature for any named place the user asks about, and GISTEMP for global temperature trends.
+If no live numbers are provided, say so briefly and invite the listener to ask about rainfall in a city or global temperature.
+When precipitation is zero, say it is a dry day and do not describe rain sounds.`;
 
 if (!GEMINI_API_KEY) {
   console.warn(
@@ -217,9 +218,139 @@ function powerWindowForRequest(requestedYmd) {
   return { start: yyyymmdd(start), end: yyyymmdd(end), requestedYmd: null };
 }
 
-async function fetchNasaPowerKathmandu(options = {}) {
-  const lat = "27.7172";
-  const lon = "85.3240";
+const DEFAULT_PLACE = {
+  name: "Kathmandu",
+  country: "Nepal",
+  lat: 27.7172,
+  lon: 85.324
+};
+
+const PLACE_ALIASES = {
+  kathmandu: DEFAULT_PLACE,
+  ktm: DEFAULT_PLACE,
+  pokhara: { name: "Pokhara", country: "Nepal", lat: 28.2096, lon: 83.9856 },
+  tokyo: { name: "Tokyo", country: "Japan", lat: 35.6762, lon: 139.6503 },
+  "new york": { name: "New York", country: "United States", lat: 40.7128, lon: -74.006 },
+  nyc: { name: "New York", country: "United States", lat: 40.7128, lon: -74.006 },
+  london: { name: "London", country: "United Kingdom", lat: 51.5074, lon: -0.1278 },
+  mumbai: { name: "Mumbai", country: "India", lat: 19.076, lon: 72.8777 },
+  delhi: { name: "Delhi", country: "India", lat: 28.6139, lon: 77.209 },
+  "new delhi": { name: "New Delhi", country: "India", lat: 28.6139, lon: 77.209 },
+  singapore: { name: "Singapore", country: "Singapore", lat: 1.3521, lon: 103.8198 },
+  sydney: { name: "Sydney", country: "Australia", lat: -33.8688, lon: 151.2093 },
+  paris: { name: "Paris", country: "France", lat: 48.8566, lon: 2.3522 },
+  miami: { name: "Miami", country: "United States", lat: 25.7617, lon: -80.1918 },
+  houston: { name: "Houston", country: "United States", lat: 29.7604, lon: -95.3698 },
+  lagos: { name: "Lagos", country: "Nigeria", lat: 6.5244, lon: 3.3792 },
+  nairobi: { name: "Nairobi", country: "Kenya", lat: -1.2921, lon: 36.8219 },
+  dhaka: { name: "Dhaka", country: "Bangladesh", lat: 23.8103, lon: 90.4125 },
+  chennai: { name: "Chennai", country: "India", lat: 13.0827, lon: 80.2707 },
+  beijing: { name: "Beijing", country: "China", lat: 39.9042, lon: 116.4074 },
+  "sao paulo": { name: "São Paulo", country: "Brazil", lat: -23.5505, lon: -46.6333 },
+  "mexico city": { name: "Mexico City", country: "Mexico", lat: 19.4326, lon: -99.1332 }
+};
+
+const geocodeCache = new Map();
+
+function extractPlaceQuery(message) {
+  let text = String(message || "");
+  // Strip dates / relative time so they are not treated as place names.
+  text = text
+    .replace(/\b(20\d{2})[-/]?(\d{2})[-/]?(\d{2})\b/gi, " ")
+    .replace(
+      /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+\d{1,2}(?:,?\s*20\d{2})?\b/gi,
+      " "
+    )
+    .replace(/\b(yesterday|today|tomorrow|now|current|latest|last\s+week)\b/gi, " ");
+
+  const patterns = [
+    /\b(?:rain|rainfall|precip(?:itation)?|weather|climate|temperature|monsoon|flood)\s+(?:in|for|at|around|near)\s+(.+)$/i,
+    /\b(?:in|for|at|around|near)\s+(.+?)\s+(?:rain|rainfall|precip(?:itation)?|weather|climate|temperature|monsoon)\b/i,
+    /^(.+?)\s+(?:rain|rainfall|precip(?:itation)?|weather|monsoon|flood)\b/i,
+    /\b(?:rain|rainfall|precip(?:itation)?|weather|monsoon)\s+(.+)$/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      const cleaned = match[1]
+        .replace(/\b(please|tell me|about|the|a|an)\b/gi, " ")
+        .replace(/[?!.]+$/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (cleaned.length >= 2) {
+        return cleaned;
+      }
+    }
+  }
+
+  return null;
+}
+
+async function geocodePlace(placeQuery) {
+  const raw = String(placeQuery || "").trim();
+  if (!raw) {
+    return { ...DEFAULT_PLACE, resolvedFrom: "default" };
+  }
+
+  const key = raw.toLowerCase().replace(/\s+/g, " ");
+  if (PLACE_ALIASES[key]) {
+    return { ...PLACE_ALIASES[key], resolvedFrom: "alias" };
+  }
+
+  if (geocodeCache.has(key)) {
+    return geocodeCache.get(key);
+  }
+
+  const url =
+    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(raw)}` +
+    `&count=1&language=en&format=json`;
+  const response = await fetch(url, {
+    headers: { Accept: "application/json", "User-Agent": "EarthInformationJukebox/1.0" }
+  });
+  if (!response.ok) {
+    throw new Error(`Geocoder HTTP ${response.status}`);
+  }
+  const data = await response.json();
+  const hit = data?.results?.[0];
+  if (!hit) {
+    throw new Error(`Could not find a location named “${raw}”. Try another city or place.`);
+  }
+
+  const place = {
+    name: hit.name,
+    country: hit.country || "",
+    admin1: hit.admin1 || "",
+    lat: hit.latitude,
+    lon: hit.longitude,
+    resolvedFrom: "geocode"
+  };
+  geocodeCache.set(key, place);
+  return place;
+}
+
+async function resolvePlace(options = {}) {
+  if (options.lat != null && options.lon != null && Number.isFinite(Number(options.lat)) && Number.isFinite(Number(options.lon))) {
+    return {
+      name: options.place || options.name || "Custom point",
+      country: "",
+      lat: Number(options.lat),
+      lon: Number(options.lon),
+      resolvedFrom: "coordinates"
+    };
+  }
+
+  const query = options.place || options.q || null;
+  if (!query) {
+    return { ...DEFAULT_PLACE, resolvedFrom: "default" };
+  }
+  return geocodePlace(query);
+}
+
+async function fetchNasaPower(options = {}) {
+  const place = await resolvePlace(options);
+  const lat = Number(place.lat).toFixed(4);
+  const lon = Number(place.lon).toFixed(4);
   const requestedYmd = parseYmd(options.date);
   const { start, end } = powerWindowForRequest(requestedYmd);
   const nasaUrl =
@@ -284,6 +415,8 @@ async function fetchNasaPowerKathmandu(options = {}) {
     )) / 86400000)
   );
 
+  const placeLabel = place.country ? `${place.name}, ${place.country}` : place.name;
+
   return {
     trackId: "atmospheric-river",
     rainfall: precip[selectedDate],
@@ -299,7 +432,14 @@ async function fetchNasaPowerKathmandu(options = {}) {
           ? `Requested ${formatNasaDate(requestedYmd)}; nearest POWER day is ${formatNasaDate(selectedDate)}`
           : `Latest POWER day available now: ${formatNasaDate(selectedDate)} (usually lags ~${Math.max(lagDays, 2)} days)`,
     series,
-    location: { lat, lon, name: "Kathmandu" },
+    location: {
+      lat: Number(lat),
+      lon: Number(lon),
+      name: place.name,
+      country: place.country || "",
+      label: placeLabel,
+      resolvedFrom: place.resolvedFrom
+    },
     source: {
       dataset: "NASA POWER Agroclimatology API",
       parameters: ["PRECTOTCORR", "T2M"],
@@ -308,6 +448,11 @@ async function fetchNasaPowerKathmandu(options = {}) {
     },
     eicPairing: EIC_TRACKS[0]
   };
+}
+
+// Back-compat alias used by older call sites / mental model.
+async function fetchNasaPowerKathmandu(options = {}) {
+  return fetchNasaPower({ ...options, place: options.place || "Kathmandu" });
 }
 
 async function fetchGistempAnnual() {
@@ -457,9 +602,14 @@ app.get("/api/eic-tracks", (_req, res) => {
 
 app.get("/api/nasa-weather", async (req, res) => {
   try {
-    const payload = await fetchNasaPowerKathmandu({ date: req.query.date });
+    const payload = await fetchNasaPower({
+      date: req.query.date,
+      place: req.query.place || req.query.q || req.query.location,
+      lat: req.query.lat,
+      lon: req.query.lon
+    });
     console.log(
-      `[NASA POWER] Kathmandu rain=${payload.rainfall} mm/day temp=${payload.temperatureC} C on ${payload.date} selection=${payload.selection}`
+      `[NASA POWER] ${payload.location.label} rain=${payload.rainfall} mm/day temp=${payload.temperatureC} C on ${payload.date} selection=${payload.selection}`
     );
     res.json(payload);
   } catch (error) {
@@ -494,9 +644,18 @@ function fallbackReplyFromSonify(sonify) {
   }
 
   if (sonify.type === "power-rain") {
+    const place = sonify.placeLabel || sonify.place || "that location";
+    const rainMm = Number(sonify.rainfallMm) || 0;
+    if (!(rainMm > 0)) {
+      return (
+        `For ${place} on ${formatNasaDate(sonify.date)}, NASA POWER shows no measurable rainfall — ` +
+        `zero millimeters per day — with air temperature around ${Number(sonify.temperatureC).toFixed(0)} degrees Celsius. ` +
+        `That is a dry day, so there is no rain soundscape.`
+      );
+    }
     return (
-      `For Kathmandu on ${formatNasaDate(sonify.date)}, rainfall was ` +
-      `${Number(sonify.rainfallMm).toFixed(1)} millimeters per day, ` +
+      `For ${place} on ${formatNasaDate(sonify.date)}, rainfall was ` +
+      `${rainMm.toFixed(1)} millimeters per day, ` +
       `and air temperature around ${Number(sonify.temperatureC).toFixed(0)} degrees Celsius.`
     );
   }
@@ -516,23 +675,38 @@ async function attachNasaContext(message) {
   let nasaContext = "";
   let sonify = null;
 
-  if (
-    lower.includes("kathmandu") ||
+  const wantsLocalWeather =
     lower.includes("rainfall") ||
     lower.includes("precipitation") ||
     lower.includes("weather") ||
-    lower.includes("rain")
-  ) {
+    lower.includes("rain") ||
+    lower.includes("monsoon") ||
+    Boolean(extractPlaceQuery(message));
+
+  if (wantsLocalWeather && !(
+    lower.includes("global temperature") ||
+    lower.includes("gistemp")
+  )) {
     const dateReq = parseDateFromMessage(message);
-    const power = await fetchNasaPowerKathmandu({
+    const placeQuery = extractPlaceQuery(message);
+    const power = await fetchNasaPower({
+      place: placeQuery || "Kathmandu",
       date: dateReq.mode === "date" ? dateReq.date : undefined
     });
+    const placeLabel = power.location.label;
+    const rainMm = Number(power.rainfall) || 0;
+    const dryNote =
+      rainMm > 0
+        ? ""
+        : " Precipitation is zero millimeters — describe a dry day and do not invent rainfall sounds.";
     nasaContext =
-      `NASA observation context: POWER for Kathmandu on ${power.date} ` +
+      `NASA observation context: POWER for ${placeLabel} ` +
+      `(lat ${power.location.lat}, lon ${power.location.lon}) on ${power.date} ` +
       `(${power.availabilityNote}) reports precipitation ${power.rainfall} millimeters per day ` +
       `and temperature ${power.temperatureC} degrees Celsius. ` +
       `Paired with SVS EIC atmospheric river visualization (${power.eicPairing.eicUrl}). ` +
-      `If the user asked for a day POWER has not published yet, explain the lag briefly.`;
+      `If the user asked for a day POWER has not published yet, explain the lag briefly.` +
+      dryNote;
     sonify = {
       type: "power-rain",
       rainfallMm: power.rainfall,
@@ -541,6 +715,10 @@ async function attachNasaContext(message) {
       requestedDate: power.requestedDate,
       selection: power.selection,
       availabilityNote: power.availabilityNote,
+      place: power.location.name,
+      placeLabel,
+      lat: power.location.lat,
+      lon: power.location.lon,
       trackId: power.trackId,
       frameUrl: power.eicPairing.frameUrl,
       citation: power.source.citation
