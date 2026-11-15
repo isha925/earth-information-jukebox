@@ -75,6 +75,10 @@
     }, ms);
   }
 
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   async function triggerTalkFromWake(heard) {
     if (startingTalk || window.jukeboxLiveActive?.()) {
       return;
@@ -82,8 +86,11 @@
     startingTalk = true;
     wakeArmed = true;
     stopWakeRecognition();
-    setStatus(`Heard “${heard}” — starting Talk…`);
+    setStatus(`Heard “${heard}” — releasing mic, then starting Talk…`);
     try {
+      // Chrome SpeechRecognition keeps the mic briefly after stop(); Live
+      // getUserMedia fails or the session dies ~3s later without this gap.
+      await delay(900);
       if (typeof window.jukeboxStartTalk === "function") {
         await window.jukeboxStartTalk({ fromWake: true });
       } else {
@@ -91,9 +98,9 @@
       }
     } finally {
       startingTalk = false;
-      // If Live did not start, resume wake listen.
+      // If Live did not start, resume wake listen later (don't fight the error UI).
       if (wakeCheckbox.checked && !window.jukeboxLiveActive?.()) {
-        scheduleRestart(1200);
+        scheduleRestart(2500);
       }
     }
   }
@@ -187,7 +194,8 @@
   window.jukeboxOnLiveEnded = () => {
     if (wakeCheckbox.checked) {
       wakeArmed = true;
-      scheduleRestart(900);
+      // Longer gap so Live fully releases the mic before wake grabs it again.
+      scheduleRestart(1600);
     }
   };
 

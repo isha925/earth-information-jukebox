@@ -124,6 +124,12 @@ async function main() {
       );
     }
 
+    // Force Chrome-STT stub path (Live duplex needs a real mic + Google WS).
+    await page.evaluate(() => {
+      window.jukeboxLiveAvailable = async () => false;
+      window.jukeboxStartLiveTalk = async () => false;
+    });
+
     // Talk -> stub transcript -> NASA rain path
     await page.click("#talkButton");
     await page.waitForFunction(
