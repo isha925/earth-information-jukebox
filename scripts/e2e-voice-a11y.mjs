@@ -22,20 +22,29 @@ function fail(name, detail) {
 async function main() {
   console.log(`E2E voice/a11y against ${BASE}`);
 
-  // 1) API: Nepali TTS returns WAV
-  const ttsRes = await fetch(`${BASE}/api/tts`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      text: "काठमाडौंमा वर्षा करिब शून्य मिलिमिटर थियो।",
-      language: "ne-NP"
-    })
-  });
-  const ttsBuf = Buffer.from(await ttsRes.arrayBuffer());
-  if (!ttsRes.ok || ttsBuf.slice(0, 4).toString() !== "RIFF" || ttsBuf.length < 1000) {
-    fail("api-tts-ne", `status=${ttsRes.status} bytes=${ttsBuf.length}`);
-  } else {
-    ok("api-tts-ne", `${ttsBuf.length} byte WAV`);
+  // 1) API: Nepali TTS returns WAV (Gemini TTS can 502 briefly — retry)
+  let ttsOk = false;
+  let ttsDetail = "";
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const ttsRes = await fetch(`${BASE}/api/tts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: "काठमाडौंमा वर्षा करिब शून्य मिलिमिटर थियो।",
+        language: "ne-NP"
+      })
+    });
+    const ttsBuf = Buffer.from(await ttsRes.arrayBuffer());
+    if (ttsRes.ok && ttsBuf.slice(0, 4).toString() === "RIFF" && ttsBuf.length >= 1000) {
+      ok("api-tts-ne", `${ttsBuf.length} byte WAV`);
+      ttsOk = true;
+      break;
+    }
+    ttsDetail = `status=${ttsRes.status} bytes=${ttsBuf.length} attempt=${attempt}`;
+    await new Promise((r) => setTimeout(r, 1200 * attempt));
+  }
+  if (!ttsOk) {
+    fail("api-tts-ne", ttsDetail);
   }
 
   // 2) API: localized Japanese fallback text
@@ -252,6 +261,55 @@ async function main() {
       { timeout: 60000 }
     );
     ok("idle-after-talk");
+
+    // Stop must kill listening without "I didn't catch that" follow-up speech
+    await page.evaluate(() => {
+      window.__stopCalled = false;
+      window.SpeechRecognition = class HangRecognition {
+        constructor() {
+          this.lang = "en-US";
+          this.onstart = null;
+          this.onresult = null;
+          this.onerror = null;
+          this.onend = null;
+        }
+        start() {
+          queueMicrotask(() => this.onstart?.());
+        }
+        stop() {
+          window.__stopCalled = true;
+          queueMicrotask(() => this.onend?.());
+        }
+        abort() {
+          window.__stopCalled = true;
+          queueMicrotask(() => this.onend?.());
+        }
+      };
+      window.webkitSpeechRecognition = window.SpeechRecognition;
+      const box = document.getElementById("keepTalking");
+      if (box) box.checked = false;
+    });
+    await page.click("#talkButton");
+    await page.waitForFunction(
+      () =>
+        (document.getElementById("talkButton")?.textContent || "").includes(
+          "Listening"
+        ),
+      { timeout: 60000 }
+    );
+    await page.click("#stopAudioBtn");
+    await page.waitForFunction(
+      () => (document.getElementById("talkButton")?.textContent || "") === "Talk",
+      { timeout: 15000 }
+    );
+    const stopStatus = await page.$eval("#statusMessage", (el) => el.textContent || "");
+    if (/didn'?t catch/i.test(stopStatus)) {
+      fail("stop-no-missed-prompt", stopStatus);
+    } else if (!/Stopped/i.test(stopStatus)) {
+      fail("stop-status", stopStatus);
+    } else {
+      ok("stop-aborts-listen", stopStatus);
+    }
 
     // Auto Japan text
     await page.select("#replyLanguage", "auto");
