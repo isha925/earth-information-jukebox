@@ -160,6 +160,7 @@ You can still type and press **Ask**, or use the quick buttons.
 | --- | --- |
 | **Ask** | Sends your typed question to the server |
 | **Talk** | **Gemini Live duplex** (free tier): mic stays open, you can interrupt. Falls back to Chrome speech only if Live is unavailable |
+| **Hey Jukebox** | Opt-in wake word (checkbox). Say “Hey Jukebox” or “Okay Earth” to start Talk automatically |
 | **Hear Kathmandu rain** | Quick demo for Kathmandu NASA POWER rain |
 | **Hear Tokyo rain** | Same idea for Tokyo |
 | **Hear global warming tone** | Plays NASA GISTEMP as a tone |

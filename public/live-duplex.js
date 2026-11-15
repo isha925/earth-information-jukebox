@@ -181,6 +181,7 @@
   }
 
   function stopLive(reason = "Talk stopped.") {
+    const wasActive = liveActive;
     if (ws && ws.readyState === WebSocket.OPEN) {
       try {
         ws.send(JSON.stringify({ type: "audio_stream_end" }));
@@ -198,6 +199,9 @@
     clearPlayback();
     setTalkLiveUi(false);
     setStatus(reason);
+    if (wasActive && typeof window.jukeboxOnLiveEnded === "function") {
+      window.jukeboxOnLiveEnded();
+    }
   }
 
   function handleNasa(message) {
@@ -262,6 +266,9 @@
       return false;
     }
 
+    if (typeof window.jukeboxPauseWake === "function") {
+      window.jukeboxPauseWake();
+    }
     if (typeof window.jukeboxStopEverything === "function") {
       window.jukeboxStopEverything("Starting Talk (Live)…");
     }

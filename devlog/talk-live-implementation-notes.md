@@ -16,3 +16,4 @@ See coordinator store `internal/talk-live-plan.md`.
 - Chrome SpeechRecognition remains last-resort fallback only; `network` error copy points back to Live/Ask.
 - `Keep listening` checkbox applies to Chrome fallback only; Live owns its own turn-taking/barge-in.
 - Capture graph uses muted ScriptProcessor destination so mic processing stays alive without speaker feedback.
+- Wake word “Hey Jukebox” / “Okay Earth” is **opt-in** (checkbox off by default). Chrome STT listens only for the trigger; Talk still starts Gemini Live. Resume wake after Live ends.
