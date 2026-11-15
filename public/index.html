@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Earth Information Jukebox</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <main class="earth-interface">
+
+    <!-- NASA EIC / SVS visual frame (not decorative stock imagery) -->
+    <div id="earthScene" class="earth-scene" aria-hidden="true"></div>
+    <div class="scene-darkening" aria-hidden="true"></div>
+
+    <section class="interface-content">
+
+      <p class="brand">EARTH INFORMATION JUKEBOX</p>
+
+      <div class="welcome-area">
+        <h1>Listen to Earth.</h1>
+
+        <p id="paMessage">
+          Welcome to Earth Information Jukebox.
+          This experience pairs NASA Earth Information Center visuals with NASA data sonification.
+          Click “Talk with me”, then ask about Kathmandu rainfall or global temperature.
+        </p>
+
+        <button id="talkButton" type="button">
+          Talk with me
+        </button>
+
+        <p id="statusMessage" class="status" aria-live="polite"></p>
+        <div id="dataDisplay" class="data-display" aria-live="polite"></div>
+        <p id="citationLine" class="citation"></p>
+      </div>
+
+      <div class="floating-controls">
+        <span class="source-pill">NASA SVS EIC · POWER · GISTEMP</span>
+      </div>
+
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
