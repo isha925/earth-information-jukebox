@@ -238,6 +238,8 @@ const RELATED_VOICE_LANGUAGES = {
   ne: ["ne-NP", "ne", "hi-IN", "hi"],
   "hi-in": ["hi-IN", "hi"],
   hi: ["hi-IN", "hi"],
+  "ja-jp": ["ja-JP", "ja"],
+  ja: ["ja-JP", "ja"],
   "bn-bd": ["bn-BD", "bn-IN", "bn", "hi-IN"],
   bn: ["bn-BD", "bn-IN", "bn", "hi-IN"],
   "ar-eg": ["ar-EG", "ar-SA", "ar"],
@@ -793,11 +795,15 @@ async function askPA(question) {
     );
     history.splice(0, Math.max(0, history.length - MAX_HISTORY_MESSAGES));
 
-    // Prefer a single spoken answer. English NASA fallback stays English if Gemini failed.
+    // Prefer a single spoken answer. Server fallback is now localized to replyLanguage.
     let finalReply = data.reply;
     let speakLang = data.replyLanguage || langPlan.speakLang || langPlan.preferred;
-    if (direct?.reply && data.fallback) {
-      // Local NASA template is English-only; keep numbers honest rather than fake Nepali.
+    const replyLooksEnglishOnly =
+      data.fallback &&
+      (!data.replyLanguage || /^en([-_]|$)/i.test(data.replyLanguage)) &&
+      direct?.reply;
+    if (replyLooksEnglishOnly && langPlan.preferred && !/^en([-_]|$)/i.test(langPlan.preferred)) {
+      // Should be rare after server localization; keep NASA numbers rather than silence.
       finalReply = direct.reply;
       speakLang = FALLBACK_LANGUAGE;
     }
@@ -806,8 +812,8 @@ async function askPA(question) {
     const langNote = langPlan.fellBackToEnglish
       ? ` · no regional voice installed, English`
       : langPlan.usedRelatedVoice
-        ? ` · ${langPlan.preferred} text via ${langPlan.voice?.name || langPlan.voiceLang}`
-        : speakLang !== FALLBACK_LANGUAGE
+        ? ` · ${langPlan.preferred} via ${langPlan.voice?.name || langPlan.voiceLang}`
+        : speakLang && !/^en([-_]|$)/i.test(speakLang)
           ? ` · speaking ${speakLang}`
           : "";
     statusMessage.textContent = data.fallback

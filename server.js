@@ -663,32 +663,128 @@ function formatNasaDate(raw) {
   return text;
 }
 
-function fallbackReplyFromSonify(sonify) {
+function formatNasaDateForSpeech(raw, replyLanguage = "en-US") {
+  const text = String(raw || "").trim();
+  let year;
+  let month;
+  let day;
+  if (/^\d{8}$/.test(text)) {
+    year = text.slice(0, 4);
+    month = text.slice(4, 6);
+    day = text.slice(6, 8);
+  } else if (/^(\d{4})-(\d{2})-(\d{2})$/.test(text)) {
+    [, year, month, day] = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  } else {
+    return formatNasaDate(raw);
+  }
+
+  const lang = String(replyLanguage || "en-US").toLowerCase();
+  if (lang.startsWith("ja")) {
+    return `${Number(year)}年${Number(month)}月${Number(day)}日`;
+  }
+  if (lang.startsWith("zh")) {
+    return `${Number(year)}年${Number(month)}月${Number(day)}日`;
+  }
+  if (lang.startsWith("ne") || lang.startsWith("hi")) {
+    return `${Number(day)}/${Number(month)}/${year}`;
+  }
+  return `${Number(day)} ${
+    [
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    ][Number(month) - 1]
+  } ${year}`;
+}
+
+function languageBase(replyLanguage) {
+  return String(replyLanguage || "en-US").toLowerCase().split("-")[0];
+}
+
+function fallbackReplyFromSonify(sonify, replyLanguage = "en-US") {
   if (!sonify) {
     return null;
   }
 
+  const lang = languageBase(replyLanguage);
+
   if (sonify.type === "power-rain") {
     const place = sonify.placeLabel || sonify.place || "that location";
     const rainMm = Number(sonify.rainfallMm) || 0;
-    if (!(rainMm > 0)) {
+    const tempC = Number(sonify.temperatureC) || 0;
+    const dateSpeech = formatNasaDateForSpeech(sonify.date, replyLanguage);
+    // Treat tiny fill/trace amounts as dry so we never say "0.0 mm of rain".
+    const dry = !(rainMm >= 0.05);
+
+    if (lang === "ja") {
+      return dry
+        ? `${place}では、${dateSpeech}のNASA POWER観測で降雨はほぼゼロミリメートル、気温は約${tempC.toFixed(0)}度でした。乾燥した日なので雨の音は出しません。`
+        : `${place}では、${dateSpeech}の降雨は1日あたり約${rainMm.toFixed(1)}ミリメートル、気温は約${tempC.toFixed(0)}度でした。`;
+    }
+    if (lang === "ne") {
+      return dry
+        ? `${place} मा ${dateSpeech} को NASA POWER अनुसार वर्षा शून्य मिलिमिटर थियो र तापक्रम करिब ${tempC.toFixed(0)} डिग्री सेल्सियस थियो। यो सुख्खा दिन हो, त्यसैले वर्षाको आवाज बजाउँदैनौं।`
+        : `${place} मा ${dateSpeech} को वर्षा करिब ${rainMm.toFixed(1)} मिलिमिटर प्रति दिन थियो र तापक्रम करिब ${tempC.toFixed(0)} डिग्री सेल्सियस थियो।`;
+    }
+    if (lang === "hi") {
+      return dry
+        ? `${place} में ${dateSpeech} को NASA POWER के अनुसार वर्षा शून्य मिलीमीटर थी और तापमान लगभग ${tempC.toFixed(0)} डिग्री सेल्सियस था। यह सूखा दिन है, इसलिए वर्षा की आवाज़ नहीं बजाई गई।`
+        : `${place} में ${dateSpeech} को वर्षा लगभग ${rainMm.toFixed(1)} मिलीमीटर प्रति दिन थी और तापमान लगभग ${tempC.toFixed(0)} डिग्री सेल्सियस था।`;
+    }
+    if (lang === "es") {
+      return dry
+        ? `En ${place}, el ${dateSpeech}, NASA POWER muestra precipitación cero milímetros y unos ${tempC.toFixed(0)} grados Celsius. Es un día seco, sin sonido de lluvia.`
+        : `En ${place}, el ${dateSpeech}, la precipitación fue de unos ${rainMm.toFixed(1)} milímetros por día y la temperatura alrededor de ${tempC.toFixed(0)} grados Celsius.`;
+    }
+    if (lang === "fr") {
+      return dry
+        ? `À ${place}, le ${dateSpeech}, NASA POWER indique zéro millimètre de pluie et environ ${tempC.toFixed(0)} degrés Celsius. Jour sec : pas de bruit de pluie.`
+        : `À ${place}, le ${dateSpeech}, les précipitations étaient d'environ ${rainMm.toFixed(1)} millimètres par jour et la température autour de ${tempC.toFixed(0)} degrés Celsius.`;
+    }
+    if (lang === "zh") {
+      return dry
+        ? `${place}在${dateSpeech}的NASA POWER数据显示降雨为零毫米，气温约${tempC.toFixed(0)}摄氏度。这是干燥的一天，因此没有雨声。`
+        : `${place}在${dateSpeech}的降雨约为每天${rainMm.toFixed(1)}毫米，气温约${tempC.toFixed(0)}摄氏度。`;
+    }
+    if (lang === "pt") {
+      return dry
+        ? `Em ${place}, em ${dateSpeech}, a NASA POWER mostra zero milímetros de chuva e cerca de ${tempC.toFixed(0)} graus Celsius. Dia seco: sem som de chuva.`
+        : `Em ${place}, em ${dateSpeech}, a precipitação foi cerca de ${rainMm.toFixed(1)} milímetros por dia e a temperatura cerca de ${tempC.toFixed(0)} graus Celsius.`;
+    }
+    if (lang === "ar") {
+      return dry
+        ? `في ${place} بتاريخ ${dateSpeech}، تُظهر بيانات ناسا باور هطولًا صفريًا ودرجة حرارة نحو ${tempC.toFixed(0)} مئوية. يوم جاف بدون صوت مطر.`
+        : `في ${place} بتاريخ ${dateSpeech}، بلغ الهطول نحو ${rainMm.toFixed(1)} مليمترًا في اليوم ودرجة الحرارة نحو ${tempC.toFixed(0)} مئوية.`;
+    }
+
+    if (dry) {
       return (
-        `For ${place} on ${formatNasaDate(sonify.date)}, NASA POWER shows no measurable rainfall — ` +
-        `zero millimeters per day — with air temperature around ${Number(sonify.temperatureC).toFixed(0)} degrees Celsius. ` +
+        `For ${place} on ${dateSpeech}, NASA POWER shows no measurable rainfall — ` +
+        `zero millimeters per day — with air temperature around ${tempC.toFixed(0)} degrees Celsius. ` +
         `That is a dry day, so there is no rain soundscape.`
       );
     }
     return (
-      `For ${place} on ${formatNasaDate(sonify.date)}, rainfall was ` +
+      `For ${place} on ${dateSpeech}, rainfall was ` +
       `${rainMm.toFixed(1)} millimeters per day, ` +
-      `and air temperature around ${Number(sonify.temperatureC).toFixed(0)} degrees Celsius.`
+      `and air temperature around ${tempC.toFixed(0)} degrees Celsius.`
     );
   }
 
   if (sonify.type === "gistemp") {
+    const year = sonify.year;
+    const anomaly = Number(sonify.anomalyC).toFixed(2);
+    if (lang === "ja") {
+      return `世界の気温偏差は${year}年で${anomaly}度でした。これは一九五一年から一九八〇年の基準より高い値です。`;
+    }
+    if (lang === "ne") {
+      return `विश्वको तापक्रम विचलन ${year} मा ${anomaly} डिग्री सेल्सियस थियो, जुन १९५१–१९८० को औसतभन्दा माथि हो।`;
+    }
+    if (lang === "hi") {
+      return `वैश्विक तापमान विसंगति ${year} में ${anomaly} डिग्री सेल्सियस थी, जो 1951–1980 के औसत से अधिक है।`;
+    }
     return (
-      `Global temperature anomaly for ${sonify.year} was ` +
-      `${Number(sonify.anomalyC).toFixed(2)} degrees Celsius above the nineteen fifty one to nineteen eighty baseline.`
+      `Global temperature anomaly for ${year} was ` +
+      `${anomaly} degrees Celsius above the nineteen fifty one to nineteen eighty baseline.`
     );
   }
 
@@ -797,13 +893,13 @@ app.post("/api/chat", async (req, res) => {
   }
 
   if (!ai) {
-    const fallback = fallbackReplyFromSonify(sonify);
+    const fallback = fallbackReplyFromSonify(sonify, language);
     if (fallback) {
       return res.json({
         reply: fallback,
         sonify,
         fallback: true,
-        replyLanguage: "en-US"
+        replyLanguage: language
       });
     }
 
@@ -835,13 +931,13 @@ app.post("/api/chat", async (req, res) => {
     const reply = toSpeakableText(response.text ?? "");
 
     if (!reply) {
-      const fallback = fallbackReplyFromSonify(sonify);
+      const fallback = fallbackReplyFromSonify(sonify, language);
       if (fallback) {
         return res.json({
           reply: fallback,
           sonify,
           fallback: true,
-          replyLanguage: "en-US"
+          replyLanguage: language
         });
       }
 
@@ -861,13 +957,13 @@ app.post("/api/chat", async (req, res) => {
   } catch (error) {
     logGeminiError(error);
 
-    const fallback = fallbackReplyFromSonify(sonify);
+    const fallback = fallbackReplyFromSonify(sonify, language);
     if (fallback) {
       return res.json({
         reply: fallback,
         sonify,
         fallback: true,
-        replyLanguage: "en-US"
+        replyLanguage: language
       });
     }
 
