@@ -207,6 +207,7 @@ function stopActiveAudio() {
     activeNoiseNode = null;
   }
   rainGainNode = null;
+  stopGeminiSpeech();
 }
 
 async function playUnlockChirp() {
@@ -336,7 +337,10 @@ function updateVoiceSupportNote(placeHint = {}) {
     return;
   }
   const resolved = resolveReplyLanguage(placeHint);
-  if (resolved.fellBackToEnglish && resolved.preferred !== FALLBACK_LANGUAGE) {
+  if (needsGeminiTts(resolved.preferred)) {
+    voiceSupportNote.textContent =
+      `Reply in ${resolved.preferred}; audio via Google Gemini TTS (device has no native ${resolved.preferred} voice).`;
+  } else if (resolved.fellBackToEnglish && resolved.preferred !== FALLBACK_LANGUAGE) {
     voiceSupportNote.textContent =
       `No ${resolved.preferred} voice installed — reply will be English.`;
   } else if (resolved.usedRelatedVoice) {
@@ -353,7 +357,39 @@ function updateVoiceSupportNote(placeHint = {}) {
   return resolved;
 }
 
-function speak(text, lang = FALLBACK_LANGUAGE) {
+let geminiSpeechUrl = null;
+let geminiSpeechAudio = null;
+
+function stopGeminiSpeech() {
+  if (geminiSpeechAudio) {
+    try {
+      geminiSpeechAudio.pause();
+      geminiSpeechAudio.src = "";
+    } catch (_error) {
+      // ignore
+    }
+    geminiSpeechAudio = null;
+  }
+  if (geminiSpeechUrl) {
+    URL.revokeObjectURL(geminiSpeechUrl);
+    geminiSpeechUrl = null;
+  }
+}
+
+function needsGeminiTts(lang) {
+  const base = String(lang || "").toLowerCase().split("-")[0];
+  // Browser packs rarely include Nepali; Gemini TTS does (and covers ja/hi/…).
+  if (!base || base === "en") {
+    return false;
+  }
+  if (base === "ne") {
+    return true;
+  }
+  const picked = pickSpeakVoice(lang);
+  return Boolean(picked.fellBackToEnglish || picked.usedRelatedVoice);
+}
+
+function speakWithBrowser(text, lang = FALLBACK_LANGUAGE) {
   if (!synth || !text) {
     return;
   }
@@ -362,8 +398,6 @@ function speak(text, lang = FALLBACK_LANGUAGE) {
 
   const start = () => {
     const picked = pickSpeakVoice(lang);
-    // Keep utterance language as the reply language when possible so Devanagari
-    // Nepali is not forced through an English voice pipeline.
     const utteranceLang = picked.fellBackToEnglish ? FALLBACK_LANGUAGE : lang;
     const sentences = text.match(/[^.!?।৷。！？]+[.!?।৷。！？]+["')\]]*|[^.!?।৷。！？]+$/g) || [
       text
@@ -391,6 +425,49 @@ function speak(text, lang = FALLBACK_LANGUAGE) {
   } else {
     start();
   }
+}
+
+async function speakWithGeminiTts(text, lang) {
+  const response = await fetch("/api/tts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, language: lang })
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || `TTS HTTP ${response.status}`);
+  }
+  const blob = await response.blob();
+  stopGeminiSpeech();
+  geminiSpeechUrl = URL.createObjectURL(blob);
+  geminiSpeechAudio = new Audio(geminiSpeechUrl);
+  geminiSpeechAudio.volume = 1;
+  await geminiSpeechAudio.play();
+}
+
+function speak(text, lang = FALLBACK_LANGUAGE) {
+  if (!text) {
+    return;
+  }
+
+  stopGeminiSpeech();
+  if (synth) {
+    synth.cancel();
+  }
+
+  if (!needsGeminiTts(lang)) {
+    speakWithBrowser(text, lang);
+    return;
+  }
+
+  speakWithGeminiTts(text, lang).catch((error) => {
+    console.error("Gemini TTS failed, using browser voice:", error);
+    if (voiceSupportNote) {
+      voiceSupportNote.textContent =
+        `Cloud voice unavailable (${error.message}). Trying device voice.`;
+    }
+    speakWithBrowser(text, lang);
+  });
 }
 
 function setEicFrame(frameUrl, citation, label) {

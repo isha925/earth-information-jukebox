@@ -1,5 +1,9 @@
 // Prefer the project .env over a stale shell export (common on this machine).
 require("dotenv").config({ quiet: true, override: true });
+// @google/genai prefers GOOGLE_API_KEY when both are set — clear a stale shell copy.
+if (process.env.GOOGLE_API_KEY && process.env.GEMINI_API_KEY) {
+  delete process.env.GOOGLE_API_KEY;
+}
 
 const path = require("path");
 const express = require("express");
@@ -8,6 +12,10 @@ const { GoogleGenAI } = require("@google/genai");
 const PORT = Number(process.env.PORT) || 3000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+// Browser speechSynthesis often has no Nepali voice; Gemini TTS does.
+const GEMINI_TTS_MODEL =
+  process.env.GEMINI_TTS_MODEL || "gemini-2.5-flash-preview-tts";
+const GEMINI_TTS_VOICE = process.env.GEMINI_TTS_VOICE || "Kore";
 const NASA_API_KEY = process.env.NASA_API_KEY || "";
 
 const MAX_MESSAGE_LENGTH = 2000;
@@ -651,6 +659,124 @@ app.get("/api/gistemp", async (_req, res) => {
   } catch (error) {
     console.error("GISTEMP Error:", error);
     res.status(500).json({ error: "Failed to fetch NASA GISTEMP data." });
+  }
+});
+
+function pcm16LeToWav(pcmBuffer, sampleRate = 24000) {
+  const bitsPerSample = 16;
+  const channels = 1;
+  const blockAlign = (channels * bitsPerSample) / 8;
+  const byteRate = sampleRate * blockAlign;
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcmBuffer.length, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcmBuffer.length, 40);
+  return Buffer.concat([header, pcmBuffer]);
+}
+
+function parseAudioMimeSampleRate(mimeType) {
+  const match = String(mimeType || "").match(/rate=(\d+)/i);
+  return match ? Number(match[1]) : 24000;
+}
+
+async function synthesizeGeminiSpeech(text) {
+  if (!GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY is not configured for TTS.");
+  }
+
+  const trimmed = String(text || "").trim().slice(0, 1200);
+  if (!trimmed) {
+    throw new Error("No text to speak.");
+  }
+
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/` +
+    `${encodeURIComponent(GEMINI_TTS_MODEL)}:generateContent` +
+    `?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: trimmed }] }],
+      generationConfig: {
+        responseModalities: ["AUDIO"],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: GEMINI_TTS_VOICE }
+          }
+        }
+      }
+    })
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message =
+      payload?.error?.message || `Gemini TTS HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  const parts = payload?.candidates?.[0]?.content?.parts || [];
+  const audioPart = parts.find((part) => part?.inlineData?.data);
+  if (!audioPart?.inlineData?.data) {
+    throw new Error("Gemini TTS returned no audio.");
+  }
+
+  const mimeType = audioPart.inlineData.mimeType || "audio/L16";
+  const raw = Buffer.from(audioPart.inlineData.data, "base64");
+  const sampleRate = parseAudioMimeSampleRate(mimeType);
+  const wav = /wav/i.test(mimeType)
+    ? raw
+    : pcm16LeToWav(raw, sampleRate);
+
+  return {
+    mimeType: "audio/wav",
+    wav,
+    model: GEMINI_TTS_MODEL,
+    voice: GEMINI_TTS_VOICE,
+    sampleRate
+  };
+}
+
+app.post("/api/tts", async (req, res) => {
+  const text = typeof req.body?.text === "string" ? req.body.text : "";
+  const language = normalizeReplyLanguage(req.body?.language);
+
+  if (!text.trim()) {
+    return res.status(400).json({ error: "No text received for speech." });
+  }
+
+  try {
+    const audio = await withTimeout(
+      synthesizeGeminiSpeech(text),
+      20000,
+      "Gemini TTS"
+    );
+    console.log(
+      `[TTS] lang=${language} model=${audio.model} voice=${audio.voice} bytes=${audio.wav.length}`
+    );
+    res.setHeader("Content-Type", audio.mimeType);
+    res.setHeader("X-TTS-Model", audio.model);
+    res.setHeader("X-TTS-Voice", audio.voice);
+    res.setHeader("X-TTS-Language", language);
+    res.send(audio.wav);
+  } catch (error) {
+    console.error("TTS ERROR:", error.message);
+    res.status(502).json({
+      error: error.message || "Could not synthesize speech.",
+      fallbackToBrowser: true
+    });
   }
 });
 

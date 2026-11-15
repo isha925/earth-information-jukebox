@@ -169,8 +169,8 @@ Click **Stop sound** anytime.
 **“It says latest day is a few days ago.”**  
 That is normal. NASA POWER daily data is not instant. The app shows the newest day NASA has published.
 
-**“I chose Nepali but it used another voice.”**  
-Many Macs/Chrome installs do not ship a Nepali voice. The app will still ask for a Nepali **text** reply when Gemini works, and may speak it with the closest installed voice (often Hindi). Only if nothing usable is installed does it fall back to English.
+**“I chose Nepali — will the audio really be Nepali?”**  
+Yes, when the Gemini API key works. Chrome/macOS usually **do not** include a Nepali system voice, so the app calls Google’s **Gemini TTS** (`gemini-2.5-flash-preview-tts`) for Nepali (and other languages without a good local voice). That is separate from the chat model. If TTS is unavailable, it falls back to the closest browser voice.
 
 **“Talk does nothing.”**  
 Use Chrome or Edge, stay on `http://localhost:3000`, and allow microphone access.
