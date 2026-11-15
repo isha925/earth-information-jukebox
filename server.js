@@ -1,4 +1,9 @@
-require("dotenv").config({ quiet: true });
+// Prefer the project .env over a stale shell export (common on this machine).
+require("dotenv").config({ quiet: true, override: true });
+// @google/genai prefers GOOGLE_API_KEY when both are set — clear a stale shell copy.
+if (process.env.GOOGLE_API_KEY && process.env.GEMINI_API_KEY) {
+  delete process.env.GOOGLE_API_KEY;
+}
 
 const path = require("path");
 const express = require("express");
@@ -7,19 +12,86 @@ const { GoogleGenAI } = require("@google/genai");
 const PORT = Number(process.env.PORT) || 3000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+// Browser speechSynthesis often has no Nepali voice; Gemini TTS does.
+const GEMINI_TTS_MODEL =
+  process.env.GEMINI_TTS_MODEL || "gemini-2.5-flash-preview-tts";
+const GEMINI_TTS_VOICE = process.env.GEMINI_TTS_VOICE || "Kore";
+const NASA_API_KEY = process.env.NASA_API_KEY || "";
 
 const MAX_MESSAGE_LENGTH = 2000;
-// Number of earlier messages (user + PA) sent back to Gemini for context.
 const MAX_HISTORY_MESSAGES = 20;
 
-const SYSTEM_INSTRUCTION = `You are the PA for Earth Information Jukebox. You speak naturally, warmly, and clearly. Your purpose is to help users explore Earth's weather and environment through conversation.
+// Curated EIC / SVS tracks. Visuals come from NASA SVS content used by the
+// Earth Information Center; numeric drivers come from NASA open APIs that
+// match the same Earth-science theme (water / climate).
+const EIC_TRACKS = [
+  {
+    id: "atmospheric-river",
+    title: "A 3D View of an Atmospheric River from an Earth System Model",
+    theme: "water resources",
+    eicSource: "NASA SVS EIC gallery item 4960",
+    eicUrl: "https://svs.gsfc.nasa.gov/4960/",
+    eicGallery: "https://svs.gsfc.nasa.gov/gallery/earth-information-center/",
+    frameUrl: "https://svs.gsfc.nasa.gov/vis/a000000/a004900/a004960/atmos_rivers_narrated_4k.00090_print.jpg",
+    videoUrl: "https://svs.gsfc.nasa.gov/vis/a000000/a004900/a004960/atmos_rivers_narrated_HD.webm",
+    numericSource: "NASA POWER daily point precipitation and temperature",
+    numericUrl: "https://power.larc.nasa.gov/",
+    whyLinked:
+      "Atmospheric rivers move water vapor; POWER PRECTOTCORR/T2M gives local rainfall and temperature that can be heard alongside the EIC water story."
+  },
+  {
+    id: "global-temperature",
+    title: "NASA GISS global surface temperature anomaly (GISTEMP v4)",
+    theme: "climate / greenhouse gases",
+    eicSource: "NASA Earth Information Center climate theme + GISTEMP v4",
+    eicUrl: "https://earth.gov/",
+    eicGallery: "https://svs.gsfc.nasa.gov/gallery/earth-information-center/",
+    frameUrl: "https://data.giss.nasa.gov/gistemp/graphs_v4/graph_data/Global_Mean_Estimates_based_on_Land_and_Ocean_Data/graph.png",
+    videoUrl: null,
+    numericSource: "NASA GISS GISTEMP v4 GLB.Ts+dSST.csv",
+    numericUrl: "https://data.giss.nasa.gov/gistemp/tabledata_v4/GLB.Ts+dSST.csv",
+    whyLinked:
+      "EIC climate storytelling is grounded in global temperature change; GISTEMP v4 is NASA's canonical anomaly series for that theme."
+  }
+];
+
+const SYSTEM_INSTRUCTION = `You are the PA for Earth Information Jukebox, a NASA Space Apps project.
+You help people hear Earth science by pairing NASA Earth Information Center visuals with NASA data-driven soundscapes.
 
 Every reply is read aloud by text-to-speech, so:
 - Keep replies short and conversational, usually two to four sentences.
 - Use plain spoken sentences only. Never use markdown, lists, headings, emoji, or links.
-- Write numbers, symbols, and units the way they are spoken, for example "20 degrees Celsius" instead of "20°C".
+- Write numbers and units the way they are spoken, for example "twenty millimeters per day".
 
-You do not have live weather data or the user's location. If asked about current conditions or forecasts, say so briefly, then offer general information or suggest checking a local weather service.`;
+When NASA observation context is provided in the user message, treat it as ground truth and explain it clearly.
+Prefer NASA POWER precipitation or temperature for any named place the user asks about, and GISTEMP for global temperature trends.
+If no live numbers are provided, say so briefly and invite the listener to ask about rainfall in a city or global temperature.
+When precipitation is zero, say it is a dry day and do not describe rain sounds.`;
+
+function buildSystemInstruction(replyLanguage) {
+  const lang = String(replyLanguage || "en-US").trim() || "en-US";
+  if (/^en([-_]|$)/i.test(lang)) {
+    return SYSTEM_INSTRUCTION;
+  }
+
+  return (
+    `${SYSTEM_INSTRUCTION}\n\n` +
+    `Speak the entire reply in the language for BCP-47 tag ${lang}. ` +
+    `Keep NASA place names, units, and numbers accurate and easy to speak aloud. ` +
+    `If you cannot reliably use that language, reply in clear English instead.`
+  );
+}
+
+function normalizeReplyLanguage(value) {
+  const text = String(value || "").trim();
+  if (!text || text.length > 16) {
+    return "en-US";
+  }
+  if (!/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(text)) {
+    return "en-US";
+  }
+  return text;
+}
 
 if (!GEMINI_API_KEY) {
   console.warn(
@@ -30,11 +102,9 @@ if (!GEMINI_API_KEY) {
 const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
 const app = express();
-
 app.use(express.json({ limit: "100kb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// Turn the client's [{ role, text }] history into Gemini contents.
 function toGeminiHistory(history) {
   if (!Array.isArray(history)) {
     return [];
@@ -50,7 +120,6 @@ function toGeminiHistory(history) {
     )
     .slice(-MAX_HISTORY_MESSAGES);
 
-  // A conversation sent to Gemini should start with the user.
   while (turns.length && turns[0].role !== "user") {
     turns.shift();
   }
@@ -61,12 +130,11 @@ function toGeminiHistory(history) {
   }));
 }
 
-// Strip leftover markdown so the text-to-speech voice doesn't read symbols aloud.
 function toSpeakableText(text) {
   return text
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/^\s*(?:[-*•]|\d+\.)\s+/gm, "")
-    .replace(/[*#`]/g, "")
+    .replace(/[*#`>_]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -76,8 +144,9 @@ function logGeminiError(error) {
     400: "Gemini rejected the request. Check GEMINI_API_KEY and GEMINI_MODEL in .env.",
     401: "GEMINI_API_KEY is not valid. Create one at https://aistudio.google.com/apikey.",
     403: "GEMINI_API_KEY does not have access to this model.",
-    404: `Model "${GEMINI_MODEL}" was not found. Set GEMINI_MODEL in .env to an available model.`,
-    429: "Gemini rate limit or quota exceeded."
+    404: `Model "${GEMINI_MODEL}" was not found. Set GEMINI_MODEL=gemini-3.8-flash in .env.`,
+    429: "Gemini rate limit or quota exceeded.",
+    503: "Gemini is temporarily overloaded. Retry shortly."
   };
 
   console.error("GEMINI ERROR:", error.status ?? "", error.message);
@@ -87,8 +156,848 @@ function logGeminiError(error) {
   }
 }
 
+function yyyymmdd(date) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
+  return `${y}${m}${d}`;
+}
+
+function parseYmd(value) {
+  if (!value) {
+    return null;
+  }
+  const text = String(value).trim();
+  if (/^\d{8}$/.test(text)) {
+    return text;
+  }
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) {
+    return `${iso[1]}${iso[2]}${iso[3]}`;
+  }
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    return yyyymmdd(parsed);
+  }
+  return null;
+}
+
+function parseDateFromMessage(message) {
+  const lower = String(message || "").toLowerCase();
+  const today = new Date();
+
+  if (/\btoday\b|\bnow\b|\bcurrent\b|\blatest\b/.test(lower)) {
+    return { mode: "latest" };
+  }
+  if (/\byesterday\b/.test(lower)) {
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - 1);
+    return { mode: "date", date: yyyymmdd(d) };
+  }
+  if (/\blast\s+week\b/.test(lower)) {
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - 7);
+    return { mode: "date", date: yyyymmdd(d) };
+  }
+
+  const iso = lower.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
+  if (iso) {
+    return { mode: "date", date: `${iso[1]}${iso[2]}${iso[3]}` };
+  }
+  const compact = lower.match(/\b(20\d{2})(\d{2})(\d{2})\b/);
+  if (compact) {
+    return { mode: "date", date: `${compact[1]}${compact[2]}${compact[3]}` };
+  }
+
+  const months = {
+    january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+    july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+    jan: 1, feb: 2, mar: 3, apr: 4, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12
+  };
+  const named = lower.match(
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+(\d{1,2})(?:,\s*(20\d{2}))?\b/
+  );
+  if (named) {
+    const month = months[named[1]];
+    const day = Number(named[2]);
+    const year = Number(named[3] || today.getUTCFullYear());
+    const d = new Date(Date.UTC(year, month - 1, day));
+    if (!Number.isNaN(d.getTime())) {
+      return { mode: "date", date: yyyymmdd(d) };
+    }
+  }
+
+  return { mode: "latest" };
+}
+
+function powerWindowForRequest(requestedYmd) {
+  if (requestedYmd) {
+    // Pull a tiny window around the requested day in case of lag/fill values.
+    const y = Number(requestedYmd.slice(0, 4));
+    const m = Number(requestedYmd.slice(4, 6));
+    const d = Number(requestedYmd.slice(6, 8));
+    const center = new Date(Date.UTC(y, m - 1, d));
+    const start = new Date(center);
+    start.setUTCDate(start.getUTCDate() - 1);
+    const end = new Date(center);
+    end.setUTCDate(end.getUTCDate() + 1);
+    return { start: yyyymmdd(start), end: yyyymmdd(end), requestedYmd };
+  }
+
+  // Ask through "today" and keep the newest non-fill day POWER has published.
+  const end = new Date();
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - 14);
+  return { start: yyyymmdd(start), end: yyyymmdd(end), requestedYmd: null };
+}
+
+const DEFAULT_PLACE = {
+  name: "Kathmandu",
+  country: "Nepal",
+  lat: 27.7172,
+  lon: 85.324
+};
+
+const PLACE_ALIASES = {
+  kathmandu: DEFAULT_PLACE,
+  ktm: DEFAULT_PLACE,
+  pokhara: { name: "Pokhara", country: "Nepal", lat: 28.2096, lon: 83.9856 },
+  tokyo: { name: "Tokyo", country: "Japan", lat: 35.6762, lon: 139.6503 },
+  "new york": { name: "New York", country: "United States", lat: 40.7128, lon: -74.006 },
+  nyc: { name: "New York", country: "United States", lat: 40.7128, lon: -74.006 },
+  london: { name: "London", country: "United Kingdom", lat: 51.5074, lon: -0.1278 },
+  mumbai: { name: "Mumbai", country: "India", lat: 19.076, lon: 72.8777 },
+  delhi: { name: "Delhi", country: "India", lat: 28.6139, lon: 77.209 },
+  "new delhi": { name: "New Delhi", country: "India", lat: 28.6139, lon: 77.209 },
+  singapore: { name: "Singapore", country: "Singapore", lat: 1.3521, lon: 103.8198 },
+  sydney: { name: "Sydney", country: "Australia", lat: -33.8688, lon: 151.2093 },
+  paris: { name: "Paris", country: "France", lat: 48.8566, lon: 2.3522 },
+  miami: { name: "Miami", country: "United States", lat: 25.7617, lon: -80.1918 },
+  houston: { name: "Houston", country: "United States", lat: 29.7604, lon: -95.3698 },
+  lagos: { name: "Lagos", country: "Nigeria", lat: 6.5244, lon: 3.3792 },
+  nairobi: { name: "Nairobi", country: "Kenya", lat: -1.2921, lon: 36.8219 },
+  dhaka: { name: "Dhaka", country: "Bangladesh", lat: 23.8103, lon: 90.4125 },
+  chennai: { name: "Chennai", country: "India", lat: 13.0827, lon: 80.2707 },
+  beijing: { name: "Beijing", country: "China", lat: 39.9042, lon: 116.4074 },
+  "sao paulo": { name: "São Paulo", country: "Brazil", lat: -23.5505, lon: -46.6333 },
+  "mexico city": { name: "Mexico City", country: "Mexico", lat: 19.4326, lon: -99.1332 }
+};
+
+const geocodeCache = new Map();
+
+function extractPlaceQuery(message) {
+  let text = String(message || "");
+  // Strip dates / relative time so they are not treated as place names.
+  text = text
+    .replace(/\b(20\d{2})[-/]?(\d{2})[-/]?(\d{2})\b/gi, " ")
+    .replace(
+      /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+\d{1,2}(?:,?\s*20\d{2})?\b/gi,
+      " "
+    )
+    .replace(/\b(yesterday|today|tomorrow|now|current|latest|last\s+week)\b/gi, " ");
+
+  const patterns = [
+    /\b(?:rain|rainfall|precip(?:itation)?|weather|climate|temperature|monsoon|flood)\s+(?:in|for|at|around|near)\s+(.+)$/i,
+    /\b(?:in|for|at|around|near)\s+(.+?)\s+(?:rain|rainfall|precip(?:itation)?|weather|climate|temperature|monsoon)\b/i,
+    /^(.+?)\s+(?:rain|rainfall|precip(?:itation)?|weather|monsoon|flood)\b/i,
+    /\b(?:rain|rainfall|precip(?:itation)?|weather|monsoon)\s+(.+)$/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      const cleaned = match[1]
+        .replace(/\b(please|tell me|about|the|a|an)\b/gi, " ")
+        .replace(/[?!.]+$/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (cleaned.length >= 2) {
+        return cleaned;
+      }
+    }
+  }
+
+  return null;
+}
+
+async function geocodePlace(placeQuery) {
+  const raw = String(placeQuery || "").trim();
+  if (!raw) {
+    return { ...DEFAULT_PLACE, resolvedFrom: "default" };
+  }
+
+  const key = raw.toLowerCase().replace(/\s+/g, " ");
+  if (PLACE_ALIASES[key]) {
+    return { ...PLACE_ALIASES[key], resolvedFrom: "alias" };
+  }
+
+  if (geocodeCache.has(key)) {
+    return geocodeCache.get(key);
+  }
+
+  const url =
+    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(raw)}` +
+    `&count=1&language=en&format=json`;
+  const response = await fetch(url, {
+    headers: { Accept: "application/json", "User-Agent": "EarthInformationJukebox/1.0" }
+  });
+  if (!response.ok) {
+    throw new Error(`Geocoder HTTP ${response.status}`);
+  }
+  const data = await response.json();
+  const hit = data?.results?.[0];
+  if (!hit) {
+    throw new Error(`Could not find a location named “${raw}”. Try another city or place.`);
+  }
+
+  const place = {
+    name: hit.name,
+    country: hit.country || "",
+    admin1: hit.admin1 || "",
+    lat: hit.latitude,
+    lon: hit.longitude,
+    resolvedFrom: "geocode"
+  };
+  geocodeCache.set(key, place);
+  return place;
+}
+
+async function resolvePlace(options = {}) {
+  if (options.lat != null && options.lon != null && Number.isFinite(Number(options.lat)) && Number.isFinite(Number(options.lon))) {
+    return {
+      name: options.place || options.name || "Custom point",
+      country: "",
+      lat: Number(options.lat),
+      lon: Number(options.lon),
+      resolvedFrom: "coordinates"
+    };
+  }
+
+  const query = options.place || options.q || null;
+  if (!query) {
+    return { ...DEFAULT_PLACE, resolvedFrom: "default" };
+  }
+  return geocodePlace(query);
+}
+
+async function fetchNasaPower(options = {}) {
+  const place = await resolvePlace(options);
+  const lat = Number(place.lat).toFixed(4);
+  const lon = Number(place.lon).toFixed(4);
+  const requestedYmd = parseYmd(options.date);
+  const { start, end } = powerWindowForRequest(requestedYmd);
+  const nasaUrl =
+    `https://power.larc.nasa.gov/api/temporal/daily/point` +
+    `?parameters=PRECTOTCORR,T2M&community=RE&longitude=${lon}&latitude=${lat}` +
+    `&start=${start}&end=${end}&format=JSON`;
+
+  const response = await fetch(nasaUrl);
+  if (!response.ok) {
+    throw new Error(`NASA POWER HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  const precip = data?.properties?.parameter?.PRECTOTCORR;
+  const temp = data?.properties?.parameter?.T2M;
+
+  if (!precip || !temp) {
+    throw new Error("Invalid response structure from NASA POWER.");
+  }
+
+  const dates = Object.keys(precip).sort();
+  const usable = dates.filter((date) => {
+    const rain = precip[date];
+    const t2m = temp[date];
+    return rain !== undefined && rain > -900 && t2m !== undefined && t2m > -900;
+  });
+
+  if (!usable.length) {
+    throw new Error("NASA POWER returned only fill values for this window.");
+  }
+
+  let selectedDate = usable[usable.length - 1];
+  let selection = "latest-available";
+  if (requestedYmd) {
+    if (usable.includes(requestedYmd)) {
+      selectedDate = requestedYmd;
+      selection = "exact";
+    } else {
+      // Nearest available day to the request.
+      selectedDate = usable.reduce((best, date) =>
+        Math.abs(Number(date) - Number(requestedYmd)) <
+        Math.abs(Number(best) - Number(requestedYmd))
+          ? date
+          : best
+      );
+      selection = "nearest-available";
+    }
+  }
+
+  const series = usable.map((date) => ({
+    date,
+    rainfallMm: precip[date],
+    tempC: temp[date]
+  }));
+
+  const lagDays = Math.max(
+    0,
+    Math.round((Date.now() - Date.UTC(
+      Number(selectedDate.slice(0, 4)),
+      Number(selectedDate.slice(4, 6)) - 1,
+      Number(selectedDate.slice(6, 8))
+    )) / 86400000)
+  );
+
+  const placeLabel = place.country ? `${place.name}, ${place.country}` : place.name;
+
+  return {
+    trackId: "atmospheric-river",
+    rainfall: precip[selectedDate],
+    temperatureC: temp[selectedDate],
+    date: selectedDate,
+    requestedDate: requestedYmd,
+    selection,
+    lagDays,
+    availabilityNote:
+      selection === "exact"
+        ? `Observation for ${formatNasaDate(selectedDate)}`
+        : selection === "nearest-available"
+          ? `Requested ${formatNasaDate(requestedYmd)}; nearest POWER day is ${formatNasaDate(selectedDate)}`
+          : `Latest POWER day available now: ${formatNasaDate(selectedDate)} (usually lags ~${Math.max(lagDays, 2)} days)`,
+    series,
+    location: {
+      lat: Number(lat),
+      lon: Number(lon),
+      name: place.name,
+      country: place.country || "",
+      label: placeLabel,
+      resolvedFrom: place.resolvedFrom
+    },
+    source: {
+      dataset: "NASA POWER Agroclimatology API",
+      parameters: ["PRECTOTCORR", "T2M"],
+      url: nasaUrl,
+      citation: "NASA Langley Research Center POWER Project"
+    },
+    eicPairing: EIC_TRACKS[0]
+  };
+}
+
+// Back-compat alias used by older call sites / mental model.
+async function fetchNasaPowerKathmandu(options = {}) {
+  return fetchNasaPower({ ...options, place: options.place || "Kathmandu" });
+}
+
+async function fetchGistempAnnual() {
+  if (gistempCache.payload && Date.now() - gistempCache.at < GISTEMP_CACHE_MS) {
+    return gistempCache.payload;
+  }
+
+  const url = "https://data.giss.nasa.gov/gistemp/tabledata_v4/GLB.Ts+dSST.csv";
+  let response;
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      response = await fetch(url, {
+        headers: {
+          "User-Agent": "EarthInformationJukebox/1.0 (NASA Space Apps)",
+          Accept: "text/csv,text/plain,*/*"
+        }
+      });
+      if (response.ok) {
+        break;
+      }
+      lastError = new Error(`GISTEMP HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (!response || !response.ok) {
+    if (gistempCache.payload) {
+      return gistempCache.payload;
+    }
+    throw lastError || new Error("GISTEMP fetch failed");
+  }
+  const text = await response.text();
+  const lines = text.trim().split(/\r?\n/);
+  // Skip title rows until the Year header.
+  const startIdx = lines.findIndex((line) => /^Year,/i.test(line.trim()));
+  if (startIdx < 0) {
+    throw new Error("Could not parse GISTEMP CSV header.");
+  }
+
+  const header = lines[startIdx].split(",").map((part) => part.trim());
+  const annualIdx = header.findIndex((part) => part === "J-D");
+  if (annualIdx < 0) {
+    throw new Error("GISTEMP CSV missing J-D annual column.");
+  }
+
+  const rows = [];
+  for (const line of lines.slice(startIdx + 1)) {
+    const parts = line.split(",").map((part) => part.trim());
+    const year = Number(parts[0]);
+    const annual = parts[annualIdx];
+    if (!Number.isFinite(year) || !annual || annual === "***") {
+      continue;
+    }
+    const anomalyC = Number(annual);
+    if (!Number.isFinite(anomalyC)) {
+      continue;
+    }
+    rows.push({ year, anomalyC });
+  }
+
+  if (!rows.length) {
+    throw new Error("GISTEMP CSV had no annual values.");
+  }
+
+  const latest = rows[rows.length - 1];
+  const payload = {
+    trackId: "global-temperature",
+    latestYear: latest.year,
+    anomalyC: latest.anomalyC,
+    series: rows.slice(-30),
+    source: {
+      dataset: "NASA GISS GISTEMP v4",
+      url,
+      citation: "Lenssen et al. / NASA Goddard Institute for Space Studies"
+    },
+    eicPairing: EIC_TRACKS[1]
+  };
+  gistempCache = { at: Date.now(), payload };
+  return payload;
+}
+
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error(`${label} timed out after ${ms}ms`);
+        error.status = 503;
+        reject(error);
+      }, ms);
+    })
+  ]);
+}
+
+let gistempCache = { at: 0, payload: null };
+const GISTEMP_CACHE_MS = 15 * 60 * 1000;
+
+app.get("/api/health", (_req, res) => {
+  res.json({
+    ok: true,
+    geminiConfigured: Boolean(ai),
+    nasaApiKeyConfigured: Boolean(NASA_API_KEY),
+    model: GEMINI_MODEL,
+    tracks: EIC_TRACKS.map((track) => track.id)
+  });
+});
+
+// Validates api.nasa.gov key. APOD is currently flaky; NEO is a stable probe.
+app.get("/api/nasa-key-check", async (_req, res) => {
+  if (!NASA_API_KEY) {
+    return res.status(503).json({
+      ok: false,
+      error: "NASA_API_KEY is not set in .env"
+    });
+  }
+
+  try {
+    const url =
+      "https://api.nasa.gov/neo/rest/v1/feed?start_date=2026-11-01&end_date=2026-11-01&api_key=" +
+      encodeURIComponent(NASA_API_KEY);
+    const response = await fetch(url);
+    const data = await response.json();
+    if (!response.ok) {
+      return res.status(502).json({
+        ok: false,
+        error: data.error_message || data.msg || `NASA API HTTP ${response.status}`
+      });
+    }
+    res.json({
+      ok: true,
+      service: "api.nasa.gov/neo",
+      elementCount: data.element_count,
+      note: "Key works. Challenge sonification still uses NASA POWER + GISTEMP + SVS EIC frames (no api.nasa.gov key required)."
+    });
+  } catch (error) {
+    console.error("NASA key check failed:", error);
+    res.status(502).json({ ok: false, error: "Failed to reach api.nasa.gov" });
+  }
+});
+
+app.get("/api/eic-tracks", (_req, res) => {
+  res.json({ tracks: EIC_TRACKS });
+});
+
+app.get("/api/nasa-weather", async (req, res) => {
+  try {
+    const payload = await fetchNasaPower({
+      date: req.query.date,
+      place: req.query.place || req.query.q || req.query.location,
+      lat: req.query.lat,
+      lon: req.query.lon
+    });
+    console.log(
+      `[NASA POWER] ${payload.location.label} rain=${payload.rainfall} mm/day temp=${payload.temperatureC} C on ${payload.date} selection=${payload.selection}`
+    );
+    res.json(payload);
+  } catch (error) {
+    console.error("NASA POWER Error:", error);
+    res.status(500).json({ error: error.message || "Failed to fetch NASA POWER climate data." });
+  }
+});
+
+app.get("/api/gistemp", async (_req, res) => {
+  try {
+    const payload = await fetchGistempAnnual();
+    console.log(`[GISTEMP] latest ${payload.latestYear} anomaly=${payload.anomalyC} C`);
+    res.json(payload);
+  } catch (error) {
+    console.error("GISTEMP Error:", error);
+    res.status(500).json({ error: "Failed to fetch NASA GISTEMP data." });
+  }
+});
+
+function pcm16LeToWav(pcmBuffer, sampleRate = 24000) {
+  const bitsPerSample = 16;
+  const channels = 1;
+  const blockAlign = (channels * bitsPerSample) / 8;
+  const byteRate = sampleRate * blockAlign;
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcmBuffer.length, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcmBuffer.length, 40);
+  return Buffer.concat([header, pcmBuffer]);
+}
+
+function parseAudioMimeSampleRate(mimeType) {
+  const match = String(mimeType || "").match(/rate=(\d+)/i);
+  return match ? Number(match[1]) : 24000;
+}
+
+async function synthesizeGeminiSpeech(text) {
+  if (!GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY is not configured for TTS.");
+  }
+
+  const trimmed = String(text || "").trim().slice(0, 1200);
+  if (!trimmed) {
+    throw new Error("No text to speak.");
+  }
+
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/` +
+    `${encodeURIComponent(GEMINI_TTS_MODEL)}:generateContent` +
+    `?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: trimmed }] }],
+      generationConfig: {
+        responseModalities: ["AUDIO"],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: GEMINI_TTS_VOICE }
+          }
+        }
+      }
+    })
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message =
+      payload?.error?.message || `Gemini TTS HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  const parts = payload?.candidates?.[0]?.content?.parts || [];
+  const audioPart = parts.find((part) => part?.inlineData?.data);
+  if (!audioPart?.inlineData?.data) {
+    throw new Error("Gemini TTS returned no audio.");
+  }
+
+  const mimeType = audioPart.inlineData.mimeType || "audio/L16";
+  const raw = Buffer.from(audioPart.inlineData.data, "base64");
+  const sampleRate = parseAudioMimeSampleRate(mimeType);
+  const wav = /wav/i.test(mimeType)
+    ? raw
+    : pcm16LeToWav(raw, sampleRate);
+
+  return {
+    mimeType: "audio/wav",
+    wav,
+    model: GEMINI_TTS_MODEL,
+    voice: GEMINI_TTS_VOICE,
+    sampleRate
+  };
+}
+
+app.post("/api/tts", async (req, res) => {
+  const text = typeof req.body?.text === "string" ? req.body.text : "";
+  const language = normalizeReplyLanguage(req.body?.language);
+
+  if (!text.trim()) {
+    return res.status(400).json({ error: "No text received for speech." });
+  }
+
+  try {
+    const audio = await withTimeout(
+      synthesizeGeminiSpeech(text),
+      20000,
+      "Gemini TTS"
+    );
+    console.log(
+      `[TTS] lang=${language} model=${audio.model} voice=${audio.voice} bytes=${audio.wav.length}`
+    );
+    res.setHeader("Content-Type", audio.mimeType);
+    res.setHeader("X-TTS-Model", audio.model);
+    res.setHeader("X-TTS-Voice", audio.voice);
+    res.setHeader("X-TTS-Language", language);
+    res.send(audio.wav);
+  } catch (error) {
+    console.error("TTS ERROR:", error.message);
+    res.status(502).json({
+      error: error.message || "Could not synthesize speech.",
+      fallbackToBrowser: true
+    });
+  }
+});
+
+
+function formatNasaDate(raw) {
+  const text = String(raw || "").trim();
+  if (/^\d{8}$/.test(text)) {
+    return `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
+  }
+  return text;
+}
+
+function formatNasaDateForSpeech(raw, replyLanguage = "en-US") {
+  const text = String(raw || "").trim();
+  let year;
+  let month;
+  let day;
+  if (/^\d{8}$/.test(text)) {
+    year = text.slice(0, 4);
+    month = text.slice(4, 6);
+    day = text.slice(6, 8);
+  } else if (/^(\d{4})-(\d{2})-(\d{2})$/.test(text)) {
+    [, year, month, day] = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  } else {
+    return formatNasaDate(raw);
+  }
+
+  const lang = String(replyLanguage || "en-US").toLowerCase();
+  if (lang.startsWith("ja")) {
+    return `${Number(year)}年${Number(month)}月${Number(day)}日`;
+  }
+  if (lang.startsWith("zh")) {
+    return `${Number(year)}年${Number(month)}月${Number(day)}日`;
+  }
+  if (lang.startsWith("ne") || lang.startsWith("hi")) {
+    return `${Number(day)}/${Number(month)}/${year}`;
+  }
+  return `${Number(day)} ${
+    [
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    ][Number(month) - 1]
+  } ${year}`;
+}
+
+function languageBase(replyLanguage) {
+  return String(replyLanguage || "en-US").toLowerCase().split("-")[0];
+}
+
+function fallbackReplyFromSonify(sonify, replyLanguage = "en-US") {
+  if (!sonify) {
+    return null;
+  }
+
+  const lang = languageBase(replyLanguage);
+
+  if (sonify.type === "power-rain") {
+    const place = sonify.placeLabel || sonify.place || "that location";
+    const rainMm = Number(sonify.rainfallMm) || 0;
+    const tempC = Number(sonify.temperatureC) || 0;
+    const dateSpeech = formatNasaDateForSpeech(sonify.date, replyLanguage);
+    // Treat tiny fill/trace amounts as dry so we never say "0.0 mm of rain".
+    const dry = !(rainMm >= 0.05);
+
+    if (lang === "ja") {
+      return dry
+        ? `${place}では、${dateSpeech}のNASA POWER観測で降雨はほぼゼロミリメートル、気温は約${tempC.toFixed(0)}度でした。乾燥した日なので雨の音は出しません。`
+        : `${place}では、${dateSpeech}の降雨は1日あたり約${rainMm.toFixed(1)}ミリメートル、気温は約${tempC.toFixed(0)}度でした。`;
+    }
+    if (lang === "ne") {
+      return dry
+        ? `${place} मा ${dateSpeech} को NASA POWER अनुसार वर्षा शून्य मिलिमिटर थियो र तापक्रम करिब ${tempC.toFixed(0)} डिग्री सेल्सियस थियो। यो सुख्खा दिन हो, त्यसैले वर्षाको आवाज बजाउँदैनौं।`
+        : `${place} मा ${dateSpeech} को वर्षा करिब ${rainMm.toFixed(1)} मिलिमिटर प्रति दिन थियो र तापक्रम करिब ${tempC.toFixed(0)} डिग्री सेल्सियस थियो।`;
+    }
+    if (lang === "hi") {
+      return dry
+        ? `${place} में ${dateSpeech} को NASA POWER के अनुसार वर्षा शून्य मिलीमीटर थी और तापमान लगभग ${tempC.toFixed(0)} डिग्री सेल्सियस था। यह सूखा दिन है, इसलिए वर्षा की आवाज़ नहीं बजाई गई।`
+        : `${place} में ${dateSpeech} को वर्षा लगभग ${rainMm.toFixed(1)} मिलीमीटर प्रति दिन थी और तापमान लगभग ${tempC.toFixed(0)} डिग्री सेल्सियस था।`;
+    }
+    if (lang === "es") {
+      return dry
+        ? `En ${place}, el ${dateSpeech}, NASA POWER muestra precipitación cero milímetros y unos ${tempC.toFixed(0)} grados Celsius. Es un día seco, sin sonido de lluvia.`
+        : `En ${place}, el ${dateSpeech}, la precipitación fue de unos ${rainMm.toFixed(1)} milímetros por día y la temperatura alrededor de ${tempC.toFixed(0)} grados Celsius.`;
+    }
+    if (lang === "fr") {
+      return dry
+        ? `À ${place}, le ${dateSpeech}, NASA POWER indique zéro millimètre de pluie et environ ${tempC.toFixed(0)} degrés Celsius. Jour sec : pas de bruit de pluie.`
+        : `À ${place}, le ${dateSpeech}, les précipitations étaient d'environ ${rainMm.toFixed(1)} millimètres par jour et la température autour de ${tempC.toFixed(0)} degrés Celsius.`;
+    }
+    if (lang === "zh") {
+      return dry
+        ? `${place}在${dateSpeech}的NASA POWER数据显示降雨为零毫米，气温约${tempC.toFixed(0)}摄氏度。这是干燥的一天，因此没有雨声。`
+        : `${place}在${dateSpeech}的降雨约为每天${rainMm.toFixed(1)}毫米，气温约${tempC.toFixed(0)}摄氏度。`;
+    }
+    if (lang === "pt") {
+      return dry
+        ? `Em ${place}, em ${dateSpeech}, a NASA POWER mostra zero milímetros de chuva e cerca de ${tempC.toFixed(0)} graus Celsius. Dia seco: sem som de chuva.`
+        : `Em ${place}, em ${dateSpeech}, a precipitação foi cerca de ${rainMm.toFixed(1)} milímetros por dia e a temperatura cerca de ${tempC.toFixed(0)} graus Celsius.`;
+    }
+    if (lang === "ar") {
+      return dry
+        ? `في ${place} بتاريخ ${dateSpeech}، تُظهر بيانات ناسا باور هطولًا صفريًا ودرجة حرارة نحو ${tempC.toFixed(0)} مئوية. يوم جاف بدون صوت مطر.`
+        : `في ${place} بتاريخ ${dateSpeech}، بلغ الهطول نحو ${rainMm.toFixed(1)} مليمترًا في اليوم ودرجة الحرارة نحو ${tempC.toFixed(0)} مئوية.`;
+    }
+
+    if (dry) {
+      return (
+        `For ${place} on ${dateSpeech}, NASA POWER shows no measurable rainfall — ` +
+        `zero millimeters per day — with air temperature around ${tempC.toFixed(0)} degrees Celsius. ` +
+        `That is a dry day, so there is no rain soundscape.`
+      );
+    }
+    return (
+      `For ${place} on ${dateSpeech}, rainfall was ` +
+      `${rainMm.toFixed(1)} millimeters per day, ` +
+      `and air temperature around ${tempC.toFixed(0)} degrees Celsius.`
+    );
+  }
+
+  if (sonify.type === "gistemp") {
+    const year = sonify.year;
+    const anomaly = Number(sonify.anomalyC).toFixed(2);
+    if (lang === "ja") {
+      return `世界の気温偏差は${year}年で${anomaly}度でした。これは一九五一年から一九八〇年の基準より高い値です。`;
+    }
+    if (lang === "ne") {
+      return `विश्वको तापक्रम विचलन ${year} मा ${anomaly} डिग्री सेल्सियस थियो, जुन १९५१–१९८० को औसतभन्दा माथि हो।`;
+    }
+    if (lang === "hi") {
+      return `वैश्विक तापमान विसंगति ${year} में ${anomaly} डिग्री सेल्सियस थी, जो 1951–1980 के औसत से अधिक है।`;
+    }
+    return (
+      `Global temperature anomaly for ${year} was ` +
+      `${anomaly} degrees Celsius above the nineteen fifty one to nineteen eighty baseline.`
+    );
+  }
+
+  return null;
+}
+
+async function attachNasaContext(message) {
+  const lower = message.toLowerCase();
+  let nasaContext = "";
+  let sonify = null;
+
+  const wantsLocalWeather =
+    lower.includes("rainfall") ||
+    lower.includes("precipitation") ||
+    lower.includes("weather") ||
+    lower.includes("rain") ||
+    lower.includes("monsoon") ||
+    Boolean(extractPlaceQuery(message));
+
+  if (wantsLocalWeather && !(
+    lower.includes("global temperature") ||
+    lower.includes("gistemp")
+  )) {
+    const dateReq = parseDateFromMessage(message);
+    const placeQuery = extractPlaceQuery(message);
+    const power = await fetchNasaPower({
+      place: placeQuery || "Kathmandu",
+      date: dateReq.mode === "date" ? dateReq.date : undefined
+    });
+    const placeLabel = power.location.label;
+    const rainMm = Number(power.rainfall) || 0;
+    const dryNote =
+      rainMm > 0
+        ? ""
+        : " Precipitation is zero millimeters — describe a dry day and do not invent rainfall sounds.";
+    nasaContext =
+      `NASA observation context: POWER for ${placeLabel} ` +
+      `(lat ${power.location.lat}, lon ${power.location.lon}) on ${power.date} ` +
+      `(${power.availabilityNote}) reports precipitation ${power.rainfall} millimeters per day ` +
+      `and temperature ${power.temperatureC} degrees Celsius. ` +
+      `Paired with SVS EIC atmospheric river visualization (${power.eicPairing.eicUrl}). ` +
+      `If the user asked for a day POWER has not published yet, explain the lag briefly.` +
+      dryNote;
+    sonify = {
+      type: "power-rain",
+      rainfallMm: power.rainfall,
+      temperatureC: power.temperatureC,
+      date: power.date,
+      requestedDate: power.requestedDate,
+      selection: power.selection,
+      availabilityNote: power.availabilityNote,
+      place: power.location.name,
+      placeLabel,
+      country: power.location.country || "",
+      lat: power.location.lat,
+      lon: power.location.lon,
+      trackId: power.trackId,
+      frameUrl: power.eicPairing.frameUrl,
+      citation: power.source.citation
+    };
+  } else if (
+    lower.includes("global temperature") ||
+    lower.includes("gistemp") ||
+    lower.includes("warming") ||
+    lower.includes("climate")
+  ) {
+    const gistemp = await fetchGistempAnnual();
+    nasaContext =
+      `NASA observation context: NASA GISS GISTEMP version 4 global annual anomaly for ` +
+      `${gistemp.latestYear} is ${gistemp.anomalyC} degrees Celsius relative to the ` +
+      `1951 to 1980 baseline. Pair this with the EIC climate theme on earth.gov.`;
+    sonify = {
+      type: "gistemp",
+      anomalyC: gistemp.anomalyC,
+      year: gistemp.latestYear,
+      trackId: gistemp.trackId,
+      frameUrl: gistemp.eicPairing.frameUrl,
+      citation: gistemp.source.citation
+    };
+  }
+
+  return { nasaContext, sonify };
+}
+
 app.post("/api/chat", async (req, res) => {
-  const { message, history } = req.body ?? {};
+  const { message, history, replyLanguage } = req.body ?? {};
+  const language = normalizeReplyLanguage(replyLanguage);
 
   if (typeof message !== "string" || !message.trim()) {
     return res.status(400).json({ error: "No message received." });
@@ -98,30 +1007,71 @@ app.post("/api/chat", async (req, res) => {
     return res.status(400).json({ error: "That message is too long." });
   }
 
+  let nasaContext = "";
+  let sonify = null;
+
+  try {
+    ({ nasaContext, sonify } = await attachNasaContext(message.trim()));
+  } catch (error) {
+    console.error("NASA context attach failed:", error.message);
+    nasaContext =
+      "NASA observation context unavailable right now. Answer generally and invite a retry.";
+  }
+
   if (!ai) {
+    const fallback = fallbackReplyFromSonify(sonify, language);
+    if (fallback) {
+      return res.json({
+        reply: fallback,
+        sonify,
+        fallback: true,
+        replyLanguage: language
+      });
+    }
+
     return res.status(503).json({
       error: "The PA isn't set up yet. Add a Gemini API key to the server's .env file."
     });
   }
 
+  const prompt = nasaContext
+    ? `${message.trim()}\n\n${nasaContext}`
+    : message.trim();
+
   try {
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: [
-        ...toGeminiHistory(history),
-        { role: "user", parts: [{ text: message.trim() }] }
-      ],
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION
-      }
-    });
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: [
+          ...toGeminiHistory(history),
+          { role: "user", parts: [{ text: prompt }] }
+        ],
+        config: {
+          systemInstruction: buildSystemInstruction(language)
+        }
+      }),
+      12000,
+      "Gemini"
+    );
 
     const reply = toSpeakableText(response.text ?? "");
 
     if (!reply) {
+      const fallback = fallbackReplyFromSonify(sonify, language);
+      if (fallback) {
+        return res.json({
+          reply: fallback,
+          sonify,
+          fallback: true,
+          replyLanguage: language
+        });
+      }
+
       console.error(
         "GEMINI EMPTY REPLY:",
-        response.candidates?.[0]?.finishReason ?? response.promptFeedback?.blockReason ?? "unknown"
+        response.candidates?.[0]?.finishReason ??
+          response.promptFeedback?.blockReason ??
+          "unknown"
       );
 
       return res.status(502).json({
@@ -129,12 +1079,22 @@ app.post("/api/chat", async (req, res) => {
       });
     }
 
-    res.json({ reply });
+    res.json({ reply, sonify, fallback: false, replyLanguage: language });
   } catch (error) {
     logGeminiError(error);
 
-    if (error.status === 429) {
-      return res.status(429).json({
+    const fallback = fallbackReplyFromSonify(sonify, language);
+    if (fallback) {
+      return res.json({
+        reply: fallback,
+        sonify,
+        fallback: true,
+        replyLanguage: language
+      });
+    }
+
+    if (error.status === 429 || error.status === 503) {
+      return res.status(error.status).json({
         error: "I'm getting a lot of questions right now. Please try again in a moment."
       });
     }
@@ -143,7 +1103,6 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-// Return JSON (not an HTML error page) for bad request bodies and other errors.
 app.use((error, req, res, next) => {
   if (res.headersSent) {
     return next(error);
@@ -166,5 +1125,7 @@ app.listen(PORT, (error) => {
     process.exit(1);
   }
 
-  console.log(`Earth Information Jukebox running at http://localhost:${PORT} (model: ${GEMINI_MODEL})`);
+  console.log(
+    `Earth Information Jukebox running at http://localhost:${PORT} (model: ${GEMINI_MODEL})`
+  );
 });
