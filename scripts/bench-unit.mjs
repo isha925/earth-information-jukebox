@@ -186,6 +186,25 @@ if (
   ok("regional-voice", "Nepali can borrow Hindi voice; English only if needed");
 }
 
+if (
+  !/function isAffirmativePhrase/.test(appJs) ||
+  !/function isNegativePhrase/.test(appJs) ||
+  !/function makeAudioIntroPrompt/.test(appJs) ||
+  !/pendingDetails/.test(appJs) ||
+  !/Would you like additional info/.test(appJs) ||
+  !/CRITICAL AUDIO-FIRST WORKFLOW FOR VISUALLY IMPAIRED LISTENERS/.test(liveProxy)
+) {
+  fail(
+    "audio-first-workflow",
+    "Missing audio-first soundscape intro, prompt for additional info, or affirmative/negative handlers"
+  );
+} else {
+  ok(
+    "audio-first-workflow",
+    "Weather sound plays first, voice prompts for additional info, confirms with 'yes' for full report"
+  );
+}
+
 if (failures.length) {
   console.error(`\n${failures.length} unit failure(s)`);
   process.exit(1);

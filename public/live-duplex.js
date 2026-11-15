@@ -271,7 +271,7 @@
     captureNode = null;
     captureSource = null;
     if (captureCtx) {
-      captureCtx.close().catch(() => {});
+      captureCtx.close().catch(() => { });
       captureCtx = null;
     }
     if (mediaStream) {
@@ -318,7 +318,7 @@
       }
       if (typeof window.jukeboxApplyLiveSonify === "function") {
         window.jukeboxApplyLiveSonify({
-          type: "rain",
+          type: "power-rain",
           rainfallMm: data.rainfallMmPerDay,
           placeLabel: data.place,
           date: data.date
@@ -446,7 +446,7 @@
           );
           setStatus(
             msg.message ||
-              "Talk is live — speak anytime; you can interrupt. NASA tools stay on."
+            "Talk is live — speak anytime; you can interrupt. NASA tools stay on."
           );
           if (paMessage) {
             paMessage.textContent =

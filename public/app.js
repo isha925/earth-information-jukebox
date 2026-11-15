@@ -29,6 +29,7 @@ let suppressAutoListen = false;
 // Bumped by Stop / new asks so in-flight speak / continue / listen awaits bail out.
 let runToken = 0;
 let geminiSpeechWaitResolve = null;
+let pendingDetails = null;
 
 // Preferred reply language by country / place (BCP-47). Used when Speak = Auto.
 const COUNTRY_REPLY_LANGUAGE = {
@@ -179,6 +180,7 @@ function stopEverything(statusText = "Stopped.") {
   bumpRunToken();
   suppressAutoListen = true;
   conversationActive = false;
+  pendingDetails = null;
   clearListeningWatchdog();
   recognitionOutcome = "aborted";
   if (recognition) {
@@ -217,6 +219,34 @@ function isStopListeningPhrase(text) {
     / सुनन बन्द|बन्द गर|रोक|अलविदा/.test(value) ||
     /聞いて.*(止|や)|ストップ|会話を終|さようなら/.test(value) ||
     /बंद करो|सुनना बंद|अलविदा/.test(value)
+  );
+}
+
+function isAffirmativePhrase(text) {
+  const value = String(text || "").trim().toLowerCase();
+  return (
+    /\b(yes|yeah|yep|sure|ok|okay|please|more|more info|additional info|additional details|details|tell me more|yes please|full info|full report|go ahead|yup|definitely)\b/i.test(
+      value
+    ) ||
+    /^(yes|yeah|yep|sure|ok|okay|please|more|details|y)$/i.test(value) ||
+    /हजुर|हुन्छ|भन्नुहोस्|हो/.test(value) ||
+    /हाँ|बताइए|बताओ|जी हाँ/.test(value) ||
+    /はい|お願い|もっと/.test(value) ||
+    /\b(oui|si|sí|por favor|s'il vous plaît)\b/i.test(value)
+  );
+}
+
+function isNegativePhrase(text) {
+  const value = String(text || "").trim().toLowerCase();
+  return (
+    /\b(no|nope|nah|no thanks|not now|no need|stop|cancel|nevermind|never mind|that's all|thats all)\b/i.test(
+      value
+    ) ||
+    /^(no|nope|nah|stop)$/i.test(value) ||
+    /नाई|हुँदैन|पर्दैन|रोक/.test(value) ||
+    /नहीं|मत बताओ|रहने दो/.test(value) ||
+    /いいえ|いらない|結構です/.test(value) ||
+    /\b(non|no gracias)\b/i.test(value)
   );
 }
 
@@ -322,6 +352,32 @@ const MISSED_PROMPTS = {
   "ar-EG": "لم أسمع ذلك. اضغط Talk واسأل عن المطر أو درجة الحرارة العالمية.",
   "sw-KE": "Sikuelewa. Bonyeza Talk, sema mvua ya jiji au tempereture ya dunia."
 };
+
+const MORE_INFO_PROMPTS = {
+  "en-US": "Would you like additional info?",
+  "ne-NP": "के तपाईं थप विवरण सुन्न चाहनुहुन्छ?",
+  "hi-IN": "क्या आप और जानकारी सुनना चाहते हैं?",
+  "ja-JP": "詳細を聞きますか？",
+  "es-ES": "¿Deseas más información?",
+  "fr-FR": "Voulez-vous plus d'informations ?",
+  "pt-BR": "Deseja mais informações?",
+  "zh-CN": "您想收听更多详细信息吗？",
+  "ar-EG": "هل ترغب في معرفة المزيد من المعلومات؟",
+  "sw-KE": "Je, ungependa maelezo zaidi?"
+};
+
+function makeAudioIntroPrompt(sonify, placeLabel, lang) {
+  const isDry = isDryPrecipitation(sonify?.rainfallMm);
+  const moreInfo = promptFor(MORE_INFO_PROMPTS, lang);
+  const where = placeLabel || "that location";
+  if (sonify?.type === "gistemp") {
+    return `Global temperature anomaly tone for ${sonify?.year || ""}. ${moreInfo}`;
+  }
+  if (isDry) {
+    return `Dry day in ${where} with zero millimeters of rain. ${moreInfo}`;
+  }
+  return `Here is the rain soundscape for ${where}. ${moreInfo}`;
+}
 
 function promptFor(map, lang) {
   return map[lang] || map[FALLBACK_LANGUAGE];
@@ -886,7 +942,7 @@ async function applySonify(sonify) {
     );
   }
 
-  if (sonify.type === "power-rain") {
+  if (sonify.type === "power-rain" || sonify.type === "rain") {
     const niceDate = formatNasaDate(sonify.date);
     const rainMm = Number(sonify.rainfallMm) || 0;
     const dry = isDryPrecipitation(rainMm);
@@ -1089,8 +1145,46 @@ async function askPA(question) {
     return;
   }
 
-  // Stop previous rain + any queued speech so we never stack "NASA… NASA…"
   const token = bumpRunToken();
+
+  // If user says "yes" / "tell me more" in response to the "Would you like additional info?" prompt:
+  if (pendingDetails && isAffirmativePhrase(trimmed)) {
+    const details = pendingDetails;
+    pendingDetails = null;
+    clearListeningWatchdog();
+    stopActiveAudio();
+    if (synth) {
+      synth.cancel();
+    }
+    setState("thinking", `Speaking full report for ${details.placeLabel}…`);
+    paMessage.textContent = details.fullReply;
+    statusMessage.textContent = `Full NASA report for ${details.placeLabel}.`;
+    await speak(details.fullReply, details.speakLang);
+    setState("idle");
+    if (isCurrentRun(token) && !suppressAutoListen) {
+      await maybeContinueConversation(details.speakLang);
+    }
+    return;
+  }
+
+  // If user says "no" / "stop" to the additional info prompt:
+  if (pendingDetails && isNegativePhrase(trimmed)) {
+    pendingDetails = null;
+    clearListeningWatchdog();
+    stopActiveAudio();
+    if (synth) {
+      synth.cancel();
+    }
+    setState("idle", "Ready. Ask another place or press Talk.");
+    paMessage.textContent = "Ready. Ask another place or press Talk.";
+    statusMessage.textContent = "Ready. Ask another place or press Talk.";
+    await speak("Okay.", FALLBACK_LANGUAGE);
+    return;
+  }
+
+  pendingDetails = null;
+
+  // Stop previous rain + any queued speech so we never stack "NASA… NASA…"
   stopActiveAudio();
   if (synth) {
     synth.cancel();
@@ -1220,6 +1314,29 @@ async function askPA(question) {
       return;
     }
 
+    if (wantsRain || wantsTemp) {
+      const placeName = direct?.sonify?.placeLabel || placeHint.name || "that location";
+      pendingDetails = {
+        fullReply,
+        speakLang,
+        placeLabel: placeName,
+        sonify: direct?.sonify || data.sonify
+      };
+
+      const introPrompt = makeAudioIntroPrompt(pendingDetails.sonify, placeName, speakLang);
+      paMessage.textContent = introPrompt;
+      statusMessage.textContent = `${placeName} soundscape playing. Say “yes” for full info.`;
+
+      await speak(introPrompt, speakLang);
+      if (isCurrentRun(token) && !suppressAutoListen) {
+        await delay(250);
+        if (isCurrentRun(token) && !suppressAutoListen) {
+          await startTalking({ prompted: true, fromConversation: true });
+        }
+      }
+      return;
+    }
+
     await speak(finalReply, speakLang);
     if (!isCurrentRun(token) || suppressAutoListen) {
       return;
@@ -1240,13 +1357,24 @@ async function askPA(question) {
         },
         { keepPaMessage: true }
       );
-      paMessage.textContent = direct.reply;
-      statusMessage.textContent =
-        "Played NASA POWER data. Gemini spoken summary unavailable.";
-      await speak(direct.reply, FALLBACK_LANGUAGE);
+      const placeName = direct?.sonify?.placeLabel || placeHint.name || "that location";
+      pendingDetails = {
+        fullReply: direct.reply,
+        speakLang: FALLBACK_LANGUAGE,
+        placeLabel: placeName,
+        sonify: direct?.sonify
+      };
+      const introPrompt = makeAudioIntroPrompt(direct?.sonify, placeName, FALLBACK_LANGUAGE);
+      paMessage.textContent = introPrompt;
+      statusMessage.textContent = `${placeName} soundscape playing. Say “yes” for full info.`;
+      await speak(introPrompt, FALLBACK_LANGUAGE);
       if (isCurrentRun(token) && !suppressAutoListen) {
-        await maybeContinueConversation(FALLBACK_LANGUAGE);
+        await delay(250);
+        if (isCurrentRun(token) && !suppressAutoListen) {
+          await startTalking({ prompted: true, fromConversation: true });
+        }
       }
+      return;
     } else {
       let problem = error.problem;
       if (!problem) {
