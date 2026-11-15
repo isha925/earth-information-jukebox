@@ -81,6 +81,10 @@
             <input id="keepTalking" type="checkbox" checked>
             Keep listening after each answer (Chrome fallback only)
           </label>
+          <label class="keep-talking wake-word">
+            <input id="wakeWordEnabled" type="checkbox">
+            Listen for “Hey Jukebox” (opt-in wake word)
+          </label>
         </div>
 
         <form id="askForm" class="ask-form">
@@ -119,7 +123,7 @@
         <p id="citationLine" class="citation"></p>
         <p class="a11y-hint">
           Shortcuts: <kbd>Alt</kbd>+<kbd>T</kbd> talk · <kbd>Alt</kbd>+<kbd>S</kbd> stop ·
-          say “stop listening” to end conversation mode
+          wake phrases: “Hey Jukebox” / “Okay Earth” (enable checkbox)
         </p>
       </div>
     </section>
@@ -127,5 +131,6 @@
 
   <script src="app.js"></script>
   <script src="live-duplex.js"></script>
+  <script src="wake-word.js"></script>
 </body>
 </html>

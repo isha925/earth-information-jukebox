@@ -113,6 +113,17 @@ async function main() {
     } else ok("dom-talk-primary");
     if (!(await page.$("#keepTalking"))) fail("dom-keep-talking", "missing");
     else ok("dom-keep-talking");
+    if (!(await page.$("#wakeWordEnabled"))) fail("dom-wake-word", "missing");
+    else ok("dom-wake-word");
+    const wakeOk = await page.evaluate(() => {
+      const fn = window.jukeboxWakeMatches;
+      if (typeof fn !== "function") return "no-fn";
+      if (!fn("hey jukebox") || !fn("Okay Earth")) return "no-match";
+      if (fn("random weather chat")) return "false-positive";
+      return "ok";
+    });
+    if (wakeOk !== "ok") fail("wake-match", wakeOk);
+    else ok("wake-match");
     if (!(await page.$(".skip-link"))) fail("dom-skip-link", "missing");
     else ok("dom-skip-link");
 

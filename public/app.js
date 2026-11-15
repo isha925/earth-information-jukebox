@@ -1339,9 +1339,14 @@ function createRecognition() {
 async function startTalking(options = {}) {
   const prompted = Boolean(options.prompted);
   const fromConversation = Boolean(options.fromConversation);
+  const fromWake = Boolean(options.fromWake);
 
   if (state === "thinking") {
     return;
+  }
+
+  if (fromWake && typeof window.jukeboxPauseWake === "function") {
+    window.jukeboxPauseWake();
   }
 
   // Prefer Gemini Live duplex Talk — avoids Chrome SpeechRecognition "network" flakes.
@@ -1521,8 +1526,9 @@ loadDefaultTrack();
 statusMessage.textContent =
   "Ready. Press Talk, or Alt+T, and ask about rain in a city or global temperature.";
 
-// Hooks for the optional Live duplex demo (live-duplex.js).
+// Hooks for Live duplex + wake word.
 window.jukeboxStopEverything = stopEverything;
+window.jukeboxStartTalk = startTalking;
 window.jukeboxApplyLiveSonify = (sonify) => {
   applySonify(sonify).catch((error) => {
     console.error("Live sonify failed:", error);

@@ -295,6 +295,17 @@ h1 {
   font-size: 0.88rem;
 }
 
+.wake-word {
+  border: 1px dashed rgba(196, 214, 230, 0.35);
+  border-radius: 999px;
+  padding: 6px 12px;
+}
+
+.wake-word:has(input:checked) {
+  border-color: rgba(120, 220, 180, 0.65);
+  color: #d9fff0;
+}
+
 .a11y-hint {
   margin: 12px 0 0;
   color: rgba(231, 238, 245, 0.62);
