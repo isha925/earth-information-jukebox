@@ -79,6 +79,17 @@
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  function extractTrailingPrompt(text) {
+    const raw = String(text || "").trim();
+    const stripped = raw
+      .replace(
+        /^(?:.*?\b)?(?:hey\s+jukebox|ok(?:ay)?\s+jukebox|hello\s+jukebox|hey\s+earth|ok(?:ay)?\s+earth|hey\s+kapsicum)\b[\s,.:;!?-]*/i,
+        ""
+      )
+      .trim();
+    return stripped.length >= 2 ? stripped : "";
+  }
+
   async function triggerTalkFromWake(heard) {
     if (startingTalk || window.jukeboxLiveActive?.()) {
       return;
@@ -86,20 +97,25 @@
     startingTalk = true;
     wakeArmed = true;
     stopWakeRecognition();
-    setStatus(`Heard “${heard}” — releasing mic, then starting Talk…`);
+    const trailing = extractTrailingPrompt(heard);
+    if (trailing) {
+      setStatus(`Heard trigger word and prompt: “${trailing}”…`);
+    } else {
+      setStatus(`Heard “${heard}” — releasing mic, then starting Talk…`);
+    }
     try {
       // Chrome SpeechRecognition keeps the mic briefly after stop(); Live
       // getUserMedia fails or the session dies ~3s later without this gap.
       await delay(900);
       if (typeof window.jukeboxStartTalk === "function") {
-        await window.jukeboxStartTalk({ fromWake: true });
+        await window.jukeboxStartTalk({ fromWake: true, question: trailing });
       } else {
         document.getElementById("talkButton")?.click();
       }
     } finally {
       startingTalk = false;
       // If Live did not start, resume wake listen later (don't fight the error UI).
-      if (wakeCheckbox.checked && !window.jukeboxLiveActive?.()) {
+      if (wakeCheckbox.checked && !window.jukeboxLiveActive?.() && !window.jukeboxIsActive?.()) {
         scheduleRestart(2500);
       }
     }

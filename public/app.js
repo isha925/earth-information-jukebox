@@ -366,17 +366,91 @@ const MORE_INFO_PROMPTS = {
   "sw-KE": "Je, ungependa maelezo zaidi?"
 };
 
-function makeAudioIntroPrompt(sonify, placeLabel, lang) {
+const SOUNDSCAPE_INTRO_PHRASES = {
+  "en-US": (where, isDry, isTemp) =>
+    isTemp
+      ? "Here is the global warming soundscape."
+      : isDry
+        ? `Dry day in ${where} with zero millimeters of rain. Here is the calm soundscape.`
+        : `Here is the rain soundscape for ${where}.`,
+  "ne-NP": (where, isDry, isTemp) =>
+    isTemp
+      ? "यहाँ विश्वव्यापी तापक्रमको ध्वनि छ।"
+      : isDry
+        ? `${where}मा आज वर्षा छैन, शून्य मिलिमिटर। यहाँ शान्त सुख्खा दिनको ध्वनि छ।`
+        : `यहाँ ${where}को वर्षा ध्वनि छ।`,
+  "hi-IN": (where, isDry, isTemp) =>
+    isTemp
+      ? "यहाँ ग्लोबल वार्मिंग की ध्वनि है।"
+      : isDry
+        ? `${where} में आज बारिश नहीं है, शून्य मिलीमीटर। यहाँ शांत सूखे दिन की ध्वनि है।`
+        : `यहाँ ${where} की बारिश की ध्वनि है।`,
+  "ja-JP": (where, isDry, isTemp) =>
+    isTemp
+      ? "地球温暖化のサウンドスケープです。"
+      : isDry
+        ? `${where}は降水量ゼロミリの乾燥した日です。穏やかなサウンドスケープをお聴きください。`
+        : `${where}の雨のサウンドスケープです。`,
+  "es-ES": (where, isDry, isTemp) =>
+    isTemp
+      ? "Aquí tienes el paisaje sonoro del calentamiento global."
+      : isDry
+        ? `Día seco en ${where} con cero milímetros de lluvia. Aquí tienes el sonido de día despejado.`
+        : `Aquí tienes el paisaje sonoro de lluvia para ${where}.`,
+  "fr-FR": (where, isDry, isTemp) =>
+    isTemp
+      ? "Voici le paysage sonore du réchauffement climatique."
+      : isDry
+        ? `Journée sèche à ${where} avec zéro millimètre de pluie. Voici l'ambiance sonore calme.`
+        : `Voici le paysage sonore de la pluie pour ${where}.`,
+  "pt-BR": (where, isDry, isTemp) =>
+    isTemp
+      ? "Aqui está a paisagem sonora do aquecimento global."
+      : isDry
+        ? `Dia seco em ${where} com zero milímetros de chuva. Aqui está o som de dia seco.`
+        : `Aqui está a paisagem sonora de chuva para ${where}.`,
+  "zh-CN": (where, isDry, isTemp) =>
+    isTemp
+      ? "这是全球变暖声音景观。"
+      : isDry
+        ? `${where}无降雨，降水量零毫米。这是晴朗干燥日声音。`
+        : `这是${where}的雨声声音景观。`,
+  "ar-EG": (where, isDry, isTemp) =>
+    isTemp
+      ? "إليك المشهد الصوتي للاحتباس الحراري."
+      : isDry
+        ? `يوم جاف في ${where} بدون أمطار. إليك نغمة اليوم الهادئ.`
+        : `إليك المشهد الصوتي للمطر في ${where}.`,
+  "sw-KE": (where, isDry, isTemp) =>
+    isTemp
+      ? "Huu hapa ni mlio wa ongezeko la joto duniani."
+      : isDry
+        ? `Siku kavu huko ${where} bila mvua, milimita sifuri. Huu hapa mlio mtulivu.`
+        : `Huu hapa mlio wa mvua kwa ajili ya ${where}.`
+};
+
+function makeSoundscapeIntro(sonify, placeLabel, lang) {
   const isDry = isDryPrecipitation(sonify?.rainfallMm);
-  const moreInfo = promptFor(MORE_INFO_PROMPTS, lang);
+  const isTemp = sonify?.type === "gistemp";
   const where = placeLabel || "that location";
-  if (sonify?.type === "gistemp") {
-    return `Global temperature anomaly tone for ${sonify?.year || ""}. ${moreInfo}`;
+
+  const builder = SOUNDSCAPE_INTRO_PHRASES[lang] || SOUNDSCAPE_INTRO_PHRASES[FALLBACK_LANGUAGE];
+  if (typeof builder === "function") {
+    return builder(where, isDry, isTemp);
+  }
+  if (isTemp) {
+    return "Here is the global warming soundscape.";
   }
   if (isDry) {
-    return `Dry day in ${where} with zero millimeters of rain. ${moreInfo}`;
+    return `Dry day in ${where} with zero millimeters of rain. Here is the calm soundscape.`;
   }
-  return `Here is the rain soundscape for ${where}. ${moreInfo}`;
+  return `Here is the rain soundscape for ${where}.`;
+}
+
+function makeAudioIntroPrompt(sonify, placeLabel, lang) {
+  const intro = makeSoundscapeIntro(sonify, placeLabel, lang);
+  const moreInfo = promptFor(MORE_INFO_PROMPTS, lang);
+  return `${intro} ${moreInfo}`;
 }
 
 function promptFor(map, lang) {
@@ -1068,7 +1142,8 @@ function extractPlaceFromQuestion(question) {
   return null;
 }
 
-async function playNasaDirect(kind, question = "") {
+async function playNasaDirect(kind, question = "", options = {}) {
+  const autoPlay = options.autoPlay !== false;
   if (kind === "rain") {
     const date = extractRequestedDate(question);
     const place = extractPlaceFromQuestion(question) || "Kathmandu";
@@ -1114,7 +1189,9 @@ async function playNasaDirect(kind, question = "") {
       : `For ${placeLabel} on ${niceDate}, rainfall was ${rainMm.toFixed(1)} ` +
         `millimeters per day, temperature around ${Number(data.temperatureC).toFixed(0)} degrees Celsius.`;
     paMessage.textContent = reply;
-    await applySonify(sonify);
+    if (autoPlay) {
+      await applySonify(sonify);
+    }
     return { reply, sonify, spoke: false };
   }
 
@@ -1135,7 +1212,9 @@ async function playNasaDirect(kind, question = "") {
     `Global temperature anomaly for ${data.latestYear} was ` +
     `${Number(data.anomalyC).toFixed(2)} degrees Celsius.`;
   paMessage.textContent = reply;
-  await applySonify(sonify);
+  if (autoPlay) {
+    await applySonify(sonify);
+  }
   return { reply, sonify, spoke: false };
 }
 
@@ -1213,15 +1292,12 @@ async function askPA(question) {
   let direct = null;
   try {
     if (wantsRain) {
-      direct = await playNasaDirect("rain", trimmed);
-      const dry = isDryPrecipitation(direct?.sonify?.rainfallMm);
+      direct = await playNasaDirect("rain", trimmed, { autoPlay: false });
       const where = direct?.sonify?.placeLabel || "place";
-      statusMessage.textContent = dry
-        ? `Dry day in ${where} (0 mm) — calm cue, not rain. Fetching spoken summary…`
-        : `Playing rain for ${where} (~${RAIN_DURATION_SEC}s). Fetching spoken summary…`;
+      statusMessage.textContent = `Found NASA data for ${where}. Preparing soundscape…`;
     } else if (wantsTemp) {
-      direct = await playNasaDirect("temp", trimmed);
-      statusMessage.textContent = "Playing temperature tone. Fetching spoken summary…";
+      direct = await playNasaDirect("temp", trimmed, { autoPlay: false });
+      statusMessage.textContent = "Found global temperature data. Preparing soundscape…";
     }
   } catch (error) {
     console.error("NASA direct play failed:", error);
@@ -1306,28 +1382,62 @@ async function askPA(question) {
       return;
     }
 
-    // Don't restart rain/tone if already playing from the direct NASA path.
-    if (data.sonify && !(direct && data.sonify.type === direct.sonify?.type)) {
-      await applySonify(data.sonify);
-    }
-    if (!isCurrentRun(token)) {
-      return;
-    }
-
     if (wantsRain || wantsTemp) {
       const placeName = direct?.sonify?.placeLabel || placeHint.name || "that location";
+      const sonifyData = direct?.sonify || data.sonify;
       pendingDetails = {
         fullReply,
         speakLang,
         placeLabel: placeName,
-        sonify: direct?.sonify || data.sonify
+        sonify: sonifyData
       };
 
-      const introPrompt = makeAudioIntroPrompt(pendingDetails.sonify, placeName, speakLang);
-      paMessage.textContent = introPrompt;
-      statusMessage.textContent = `${placeName} soundscape playing. Say “yes” for full info.`;
+      // Step 1: First say "Here is the soundscape for [Place]"
+      const introText = makeSoundscapeIntro(sonifyData, placeName, speakLang);
+      paMessage.textContent = introText;
+      statusMessage.textContent = `Announcing soundscape for ${placeName}…`;
+      await speak(introText, speakLang);
+      if (!isCurrentRun(token)) {
+        return;
+      }
 
-      await speak(introPrompt, speakLang);
+      // Step 2: Plays it
+      statusMessage.textContent = `Playing soundscape for ${placeName}…`;
+      await applySonify(sonifyData);
+      if (!isCurrentRun(token)) {
+        return;
+      }
+
+      const isDry = isDryPrecipitation(sonifyData?.rainfallMm);
+      if (sonifyData?.type === "gistemp") {
+        await delay(2600);
+      } else if (isDry) {
+        await delay(1800);
+      } else {
+        // Let the rain soundscape play clearly for 5 seconds
+        await delay(5000);
+        if (rainGainNode && audioCtx) {
+          try {
+            rainGainNode.gain.linearRampToValueAtTime(0.0001, audioCtx.currentTime + 0.8);
+          } catch (_e) {
+            // ignore
+          }
+        }
+        await delay(900);
+        stopActiveAudio();
+      }
+
+      if (!isCurrentRun(token)) {
+        return;
+      }
+
+      // Step 3: Then asks if user wants additional info
+      const moreInfoPrompt = promptFor(MORE_INFO_PROMPTS, speakLang);
+      paMessage.textContent = `${introText}\n\n${moreInfoPrompt}`;
+      statusMessage.textContent = `${placeName} soundscape played. Say “yes” for full info.`;
+      await speak(moreInfoPrompt, speakLang);
+
+      // Step 4: Listens for user response
       if (isCurrentRun(token) && !suppressAutoListen) {
         await delay(250);
         if (isCurrentRun(token) && !suppressAutoListen) {
@@ -1358,16 +1468,59 @@ async function askPA(question) {
         { keepPaMessage: true }
       );
       const placeName = direct?.sonify?.placeLabel || placeHint.name || "that location";
+      const sonifyData = direct?.sonify;
       pendingDetails = {
         fullReply: direct.reply,
         speakLang: FALLBACK_LANGUAGE,
         placeLabel: placeName,
-        sonify: direct?.sonify
+        sonify: sonifyData
       };
-      const introPrompt = makeAudioIntroPrompt(direct?.sonify, placeName, FALLBACK_LANGUAGE);
-      paMessage.textContent = introPrompt;
-      statusMessage.textContent = `${placeName} soundscape playing. Say “yes” for full info.`;
-      await speak(introPrompt, FALLBACK_LANGUAGE);
+
+      // Step 1: First say "Here is the soundscape for [Place]"
+      const introText = makeSoundscapeIntro(sonifyData, placeName, FALLBACK_LANGUAGE);
+      paMessage.textContent = introText;
+      statusMessage.textContent = `Announcing soundscape for ${placeName}…`;
+      await speak(introText, FALLBACK_LANGUAGE);
+      if (!isCurrentRun(token)) {
+        return;
+      }
+
+      // Step 2: Plays it
+      statusMessage.textContent = `Playing soundscape for ${placeName}…`;
+      await applySonify(sonifyData);
+      if (!isCurrentRun(token)) {
+        return;
+      }
+
+      const isDry = isDryPrecipitation(sonifyData?.rainfallMm);
+      if (sonifyData?.type === "gistemp") {
+        await delay(2600);
+      } else if (isDry) {
+        await delay(1800);
+      } else {
+        await delay(5000);
+        if (rainGainNode && audioCtx) {
+          try {
+            rainGainNode.gain.linearRampToValueAtTime(0.0001, audioCtx.currentTime + 0.8);
+          } catch (_e) {
+            // ignore
+          }
+        }
+        await delay(900);
+        stopActiveAudio();
+      }
+
+      if (!isCurrentRun(token)) {
+        return;
+      }
+
+      // Step 3: Then asks if user wants additional info
+      const moreInfoPrompt = promptFor(MORE_INFO_PROMPTS, FALLBACK_LANGUAGE);
+      paMessage.textContent = `${introText}\n\n${moreInfoPrompt}`;
+      statusMessage.textContent = `${placeName} soundscape played. Say “yes” for full info.`;
+      await speak(moreInfoPrompt, FALLBACK_LANGUAGE);
+
+      // Step 4: Listens for user response
       if (isCurrentRun(token) && !suppressAutoListen) {
         await delay(250);
         if (isCurrentRun(token) && !suppressAutoListen) {
@@ -1548,6 +1701,15 @@ async function startTalking(options = {}) {
   const prompted = Boolean(options.prompted);
   const fromConversation = Boolean(options.fromConversation);
   const fromWake = Boolean(options.fromWake);
+  const question = options.question ? String(options.question).trim() : "";
+
+  if (question) {
+    if (fromWake && typeof window.jukeboxPauseWake === "function") {
+      window.jukeboxPauseWake();
+    }
+    askPA(question);
+    return;
+  }
 
   if (state === "thinking") {
     return;

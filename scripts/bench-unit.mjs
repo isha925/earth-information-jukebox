@@ -190,6 +190,7 @@ if (
   !/function isAffirmativePhrase/.test(appJs) ||
   !/function isNegativePhrase/.test(appJs) ||
   !/function makeAudioIntroPrompt/.test(appJs) ||
+  !/function makeSoundscapeIntro/.test(appJs) ||
   !/pendingDetails/.test(appJs) ||
   !/Would you like additional info/.test(appJs) ||
   !/CRITICAL AUDIO-FIRST WORKFLOW FOR VISUALLY IMPAIRED LISTENERS/.test(liveProxy)
@@ -201,7 +202,7 @@ if (
 } else {
   ok(
     "audio-first-workflow",
-    "Weather sound plays first, voice prompts for additional info, confirms with 'yes' for full report"
+    "System announces soundscape first, plays it, then asks if user wants additional info"
   );
 }
 

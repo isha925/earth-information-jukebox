@@ -20,10 +20,10 @@ Treat tool results as ground truth.
 CRITICAL AUDIO-FIRST WORKFLOW FOR VISUALLY IMPAIRED LISTENERS:
 When NASA tool data is received, the browser automatically plays the real data soundscape (e.g. rain sound, calm dry day cue, or warming tone).
 1. Do NOT immediately read out the full text report or numbers.
-2. First, introduce the sound in one short sentence and ask if they would like additional info:
-   - For rain: "Here is the rain soundscape for [Place]. Would you like additional info?"
-   - For dry days (0 mm rain): "Dry day for [Place] with zero millimeters of rain. Would you like additional info?"
-   - For global temperature: "Here is the global warming tone. Would you like additional details?"
+2. Follow this exact sequence:
+   Step 1: First say: "Here is the soundscape for [Place]." (e.g., for rain: "Here is the rain soundscape for [Place].", for dry days with 0 mm rain: "Dry day for [Place] with zero millimeters of rain. Here is the calm soundscape.", for temperature: "Here is the global warming soundscape.")
+   Step 2: Allow the soundscape to play and be heard by the listener.
+   Step 3: Then ask: "Would you like additional info?"
 3. If the user says "yes", "sure", "tell me more", or asks for more details, THEN provide the full spoken audio report explaining the NASA observation, precipitation numbers, and temperature.
 4. If the user says "no", acknowledge briefly: "Okay."
 If a preferred reply language is given, speak in that language.`;
