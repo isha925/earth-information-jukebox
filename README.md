@@ -41,31 +41,66 @@ You do **not** need to edit the code to run a demo. You mainly need Node.js, a G
 
 ---
 
-## How it works (simple flow)
+## How it works (practice this for your demo video)
 
-```
-You ask “rain in Tokyo”
-        ↓
-Browser sends the question to our server
-        ↓
-Server finds Tokyo’s coordinates
-        ↓
-Server asks NASA POWER for rain + temperature there
-        ↓
-Browser plays sound (rain if mm > 0, calm if dry)
-        ↓
-Gemini (or a local NASA sentence if Gemini is busy) speaks a short answer
-```
+Speak slowly. One idea per sentence. The audience only needs three ideas: **NASA gives the truth**, **sound makes it feel real**, **Gemini is the voice**.
 
-**Important honesty rules built in:**
+### 1) What the person does
 
-- Background image = NASA SVS / Earth Information Center (see `DATASETS.md`)
-- Numbers = NASA POWER or GISTEMP
+1. Open the app in Chrome.
+2. Press **Talk** (or say **“Hey Jukebox”** if wake word is on).
+3. Ask something simple, like “rain in Kathmandu” or “global temperature”.
+4. Watch the NASA Earth picture, hear the sound, and listen to the short spoken answer.
+
+### 2) How NASA data is used
+
+NASA is the source of the science. Gemini does **not** invent the numbers.
+
+| What you see / hear | Which NASA data | What it means |
+| --- | --- | --- |
+| Big Earth picture | NASA SVS / Earth Information Center (for example atmospheric river SVS 4960) | Real NASA science storytelling visual |
+| Rain / dry sound for a city | NASA **POWER** daily rainfall and temperature for that place’s latitude and longitude | Local weather numbers from NASA |
+| Rising tone for warming | NASA **GISTEMP** global temperature anomaly | How much warmer the planet is vs the baseline |
+
+Simple story you can say on camera:
+
+> “When I ask about rain in a city, the app finds that place, downloads NASA POWER rainfall and temperature for that spot, and turns those numbers into sound. Zero millimeters means a dry day — we play a calm cue, not fake rain. For global warming, we use NASA GISTEMP. The picture on screen is from NASA’s Earth Information Center, not a random photo.”
+
+### 3) How Gemini APIs are used for voice
+
+Gemini is the **conversation and voice layer**. It helps people talk to the NASA numbers.
+
+| Gemini piece | What it does in this app |
+| --- | --- |
+| **Gemini Live** (Talk button) | Live two-way voice: you speak, it listens, you can interrupt. This is the main Talk path. |
+| **NASA tools inside Live** | When you ask about rain or global temperature, Live calls our server tools that fetch NASA POWER / GISTEMP, then speaks from those results. |
+| **Gemini TTS** (when needed) | If the computer has no good voice for a language like Nepali, the app can synthesize that language with Gemini text-to-speech. |
+| **Gemini chat** (typed Ask / fallback) | If Live is unavailable, typed questions still get a short spoken NASA summary through the chat path. |
+
+Simple story you can say on camera:
+
+> “NASA is the data. Gemini is the voice. Talk uses Gemini Live so you can have a real conversation and interrupt. When you ask about rain, Live asks our NASA tools for POWER or GISTEMP, then answers out loud. If your computer has no Nepali system voice, Gemini TTS can still speak Nepali.”
+
+### 4) One full demo path (say this while clicking)
+
+1. “Here is the NASA Earth Information Center visual.”
+2. “I press Talk — that opens Gemini Live.”
+3. “I ask: rain in Tokyo.”
+4. “The app fetches NASA POWER for Tokyo.”
+5. “If rainfall is above zero, you hear rain; if it is zero, you hear a dry cue.”
+6. “Gemini speaks a short summary of those NASA numbers.”
+7. “For global temperature, same idea with NASA GISTEMP as a tone.”
+
+### Honesty rules (say these if a judge asks)
+
+- Background image = NASA SVS / Earth Information Center (details in `DATASETS.md`)
+- Numbers = NASA POWER or GISTEMP — not made up by the AI
 - If rainfall is **0**, you hear a dry cue — not fake rain
 - NASA POWER often lags a few days; the UI says “latest available day”
-- If Nepali (or another language) has no matching system voice, the app tries a close voice (for Nepali, often Hindi) before falling back to English
+- If Google’s voice service is busy, the banner tells you to try again in a few minutes
 
 ---
+
 
 ## Before you start (checklist)
 
