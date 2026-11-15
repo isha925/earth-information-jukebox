@@ -120,6 +120,22 @@ async function main() {
     if (!/Talk with Earth/i.test(h1)) fail("copy-h1", h1);
     else ok("copy-h1", h1.trim());
 
+    const health = await fetch(`${BASE}/api/health`).then((r) => r.json());
+    if (!health.liveDuplex || !/native-audio|live/i.test(health.liveModel || "")) {
+      fail("health-live-duplex", JSON.stringify(health));
+    } else {
+      ok("health-live-duplex", health.liveModel);
+    }
+    const liveHook = await page.evaluate(() => typeof window.jukeboxStartLiveTalk);
+    if (liveHook !== "function") fail("dom-live-hook", liveHook);
+    else ok("dom-live-hook");
+
+    // Force Chrome-STT path for language-pack assertions (Live is covered by health + WS smoke).
+    await page.evaluate(() => {
+      window.jukeboxLiveAvailable = async () => false;
+      window.jukeboxStartLiveTalk = async () => false;
+    });
+
     // Talk language awareness: Nepali answers => Hindi STT pack (Chrome has no ne STT)
     await page.select("#replyLanguage", "ne-NP");
     await page.evaluate(() => {

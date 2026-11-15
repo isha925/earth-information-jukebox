@@ -28,8 +28,9 @@
         <p class="eyebrow">Conversation mode</p>
         <h1>Talk with Earth.</h1>
         <p class="problem">
-          You do not need to read the screen. Press <strong>Talk</strong>, ask for rain in any city
-          or global temperature, and the jukebox answers out loud with NASA data as sound.
+          You do not need to read the screen. Press <strong>Talk</strong> for a live duplex
+          conversation (Gemini Live), ask for rain in any city or global temperature, and hear
+          NASA data as sound. You can interrupt anytime.
         </p>
       </div>
 
@@ -64,7 +65,7 @@
             id="talkButton"
             type="button"
             class="talk-primary"
-            aria-label="Start or stop talking with the jukebox. Shortcut: Alt plus T"
+            aria-label="Start or stop live duplex Talk with the jukebox. Shortcut: Alt plus T"
           >
             Talk
           </button>
@@ -78,7 +79,7 @@
           </button>
           <label class="keep-talking">
             <input id="keepTalking" type="checkbox" checked>
-            Keep listening after each answer
+            Keep listening after each answer (Chrome fallback only)
           </label>
         </div>
 
@@ -125,5 +126,6 @@
   </main>
 
   <script src="app.js"></script>
+  <script src="live-duplex.js"></script>
 </body>
 </html>

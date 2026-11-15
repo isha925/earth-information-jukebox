@@ -357,6 +357,11 @@ h1 {
   transform: translateY(-1px);
 }
 
+#talkButton.is-live {
+  border-color: rgba(120, 220, 180, 0.85);
+  box-shadow: 0 0 0 1px rgba(120, 220, 180, 0.35);
+}
+
 #askButton:disabled,
 #talkButton:disabled,
 .quick-actions button:disabled {

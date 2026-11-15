@@ -100,6 +100,8 @@ Open `.env` in any text editor and set:
 ```bash
 GEMINI_API_KEY=paste-your-key-here
 GEMINI_MODEL=gemini-3.8-flash
+# Optional Live duplex demo (free-tier native audio):
+# GEMINI_LIVE_MODEL=gemini-2.5-flash-native-audio-latest
 ```
 
 Save the file.
@@ -142,11 +144,10 @@ You do **not** need to read the page.
 
 1. Set **Answer language** (or leave Auto)  
 2. Click **Talk** (or press `Alt+T`) and allow the microphone  
-3. Wait for the spoken “I'm listening…” prompt **in that language**  
-4. Speak your question (Talk listens in the matching speech language; Nepali uses Hindi listening because Chrome has no Nepali mic language)  
-5. Hear NASA data as sound + a spoken answer  
-6. If **Keep listening after each answer** is checked, it listens again  
-7. Say `stop listening` (or the local equivalent) or press **Talk** / **Stop** to pause  
+3. Speak naturally — Talk uses **Gemini Live** (bidirectional); you can interrupt  
+4. Ask about rain in a city or global temperature; NASA tools ground the answer and sonify  
+5. Press **Talk** or **Stop** to end the live session  
+6. If Live cannot connect, Talk may fall back to Chrome speech (that path needs Google’s speech service)  
 
 
 You can still type and press **Ask**, or use the quick buttons.
@@ -158,11 +159,11 @@ You can still type and press **Ask**, or use the quick buttons.
 | Control | What happens |
 | --- | --- |
 | **Ask** | Sends your typed question to the server |
-| **Talk** | Listens with the mic (Chrome), then asks the same way |
+| **Talk** | **Gemini Live duplex** (free tier): mic stays open, you can interrupt. Falls back to Chrome speech only if Live is unavailable |
 | **Hear Kathmandu rain** | Quick demo for Kathmandu NASA POWER rain |
 | **Hear Tokyo rain** | Same idea for Tokyo |
 | **Hear global warming tone** | Plays NASA GISTEMP as a tone |
-| **Stop** | Stops rain / tone / speech **and** listening (no more auto-listen) |
+| **Stop** | Stops rain / tone / speech **and** Live/listening |
 | **Speak reply in** | Chooses the spoken language (Auto picks from the place when it can) |
 
 ---

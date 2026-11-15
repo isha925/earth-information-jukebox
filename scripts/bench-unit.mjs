@@ -93,6 +93,19 @@ if (
   ok("stop-hard-abort", "runToken + stopEverything + no speak-after-cancel");
 }
 
+const liveProxy = fs.readFileSync(path.join(ROOT, "live-proxy.js"), "utf8");
+const liveClient = fs.readFileSync(path.join(ROOT, "public", "live-duplex.js"), "utf8");
+if (
+  !/attachLiveProxy/.test(liveProxy) ||
+  !/gemini-2.5-flash-native-audio-latest/.test(liveProxy) ||
+  !/jukeboxStartLiveTalk/.test(liveClient) ||
+  !/jukeboxStartLiveTalk/.test(appJs)
+) {
+  fail("talk-live-duplex", "Talk must prefer Gemini Live over Chrome speech");
+} else {
+  ok("talk-live-duplex", "Live proxy + Talk prefers jukeboxStartLiveTalk");
+}
+
 if (
   !/function recognitionLanguageFor/.test(appJs) ||
   !/LISTEN_PROMPTS/.test(appJs) ||

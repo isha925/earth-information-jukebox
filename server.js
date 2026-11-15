@@ -6,8 +6,10 @@ if (process.env.GOOGLE_API_KEY && process.env.GEMINI_API_KEY) {
 }
 
 const path = require("path");
+const http = require("http");
 const express = require("express");
 const { GoogleGenAI } = require("@google/genai");
+const { attachLiveProxy, LIVE_MODEL } = require("./live-proxy");
 
 const PORT = Number(process.env.PORT) || 3000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -592,6 +594,8 @@ app.get("/api/health", (_req, res) => {
     geminiConfigured: Boolean(ai),
     nasaApiKeyConfigured: Boolean(NASA_API_KEY),
     model: GEMINI_MODEL,
+    liveModel: LIVE_MODEL,
+    liveDuplex: Boolean(GEMINI_API_KEY),
     tracks: EIC_TRACKS.map((track) => track.id)
   });
 });
@@ -1129,13 +1133,21 @@ app.use((error, req, res, next) => {
   });
 });
 
-app.listen(PORT, (error) => {
+const server = http.createServer(app);
+
+attachLiveProxy(server, {
+  apiKey: GEMINI_API_KEY,
+  fetchNasaPower,
+  fetchGistempAnnual
+});
+
+server.listen(PORT, (error) => {
   if (error) {
     console.error(`Could not start the server on port ${PORT}:`, error.message);
     process.exit(1);
   }
 
   console.log(
-    `Earth Information Jukebox running at http://localhost:${PORT} (model: ${GEMINI_MODEL})`
+    `Earth Information Jukebox running at http://localhost:${PORT} (model: ${GEMINI_MODEL}; live: ${LIVE_MODEL})`
   );
 });
