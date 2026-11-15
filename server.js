@@ -65,7 +65,7 @@ Every reply is read aloud by text-to-speech, so:
 - Use plain spoken sentences only. Never use markdown, lists, headings, emoji, or links.
 - Write numbers and units the way they are spoken, for example "twenty millimeters per day".
 
-When NASA observation context is provided in the user message, treat it as ground truth and explain it clearly.
+When NASA observation context is provided in the user message, treat it as ground truth and explain it clearly in layman terms without any heavy vocabulary, break every metric/number into simpler terms or analogies.
 Prefer NASA POWER precipitation or temperature for any named place the user asks about, and GISTEMP for global temperature trends.
 If no live numbers are provided, say so briefly and invite the listener to ask about rainfall in a city or global temperature.
 When precipitation is zero, say it is a dry day and do not describe rain sounds.`;
@@ -535,7 +535,7 @@ async function fetchNasaPower(options = {}) {
       // Nearest available day to the request.
       selectedDate = usable.reduce((best, date) =>
         Math.abs(Number(date) - Number(requestedYmd)) <
-        Math.abs(Number(best) - Number(requestedYmd))
+          Math.abs(Number(best) - Number(requestedYmd))
           ? date
           : best
       );
@@ -764,17 +764,17 @@ app.get("/api/nasa-weather", async (req, res) => {
     const missingPlace = /could not find a location|try a city name|geocoder/i.test(message);
     const problem = missingPlace
       ? explainProblem({
-          code: "place_not_found",
-          what: "Could not resolve that place for NASA POWER.",
-          why: message,
-          next: "Ask with a city name (for example “rain in Austin” or “rain in Tokyo”), not only a broad region word if lookup fails."
-        })
+        code: "place_not_found",
+        what: "Could not resolve that place for NASA POWER.",
+        why: message,
+        next: "Ask with a city name (for example “rain in Austin” or “rain in Tokyo”), not only a broad region word if lookup fails."
+      })
       : explainProblem({
-          code: "nasa_power_failed",
-          what: "NASA POWER weather lookup failed.",
-          why: message,
-          next: "Check your internet connection and try again in a moment. The server log shows the detailed NASA/geocoder error."
-        });
+        code: "nasa_power_failed",
+        what: "NASA POWER weather lookup failed.",
+        why: message,
+        next: "Check your internet connection and try again in a moment. The server log shows the detailed NASA/geocoder error."
+      });
     res.status(missingPlace ? 404 : 502).json(problem);
   }
 });
@@ -953,12 +953,11 @@ function formatNasaDateForSpeech(raw, replyLanguage = "en-US") {
   if (lang.startsWith("ne") || lang.startsWith("hi")) {
     return `${Number(day)}/${Number(month)}/${year}`;
   }
-  return `${Number(day)} ${
-    [
+  return `${Number(day)} ${[
       "Jan", "Feb", "Mar", "Apr", "May", "Jun",
       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
     ][Number(month) - 1]
-  } ${year}`;
+    } ${year}`;
 }
 
 function languageBase(replyLanguage) {
@@ -1209,8 +1208,8 @@ app.post("/api/chat", async (req, res) => {
       console.error(
         "GEMINI EMPTY REPLY:",
         response.candidates?.[0]?.finishReason ??
-          response.promptFeedback?.blockReason ??
-          "unknown"
+        response.promptFeedback?.blockReason ??
+        "unknown"
       );
 
       return res.status(502).json(
