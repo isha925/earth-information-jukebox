@@ -25,6 +25,7 @@ Sight-only tools also shut out people who learn better by listening — or who c
 2. Name any place → geocode → NASA POWER point rainfall/temperature → rain soundscape **only if precip > 0** (dry day → calm cue, not fake rain).
 3. NASA GISTEMP v4 global temperature anomaly drives a pitch-mapped tone.
 4. Ask or Talk: Gemini narrates the numbers (with a local NASA fallback if Gemini is overloaded).
+5. **Speak reply in** a regional language when the browser has a matching voice (Auto picks by place — e.g. Nepal → Nepali, Japan → Japanese); otherwise it **falls back to English** automatically.
 
 That is the challenge brief, solved for a concrete human need: **ask anywhere, hear honest Earth numbers**.
 
@@ -62,7 +63,8 @@ Full citations and eligibility notes: **[`DATASETS.md`](./DATASETS.md)**
    - Dated POWER query; UI explains lag / nearest available day
 4. Click **Hear global warming tone**  
    - GISTEMP anomaly → pitch
-5. Optional: **Talk** → say `rain in London` (Chrome mic)
+5. Optional: set **Speak reply in** to Auto / Nepali / Japanese / … (falls back to English if that voice is missing)
+6. Optional: **Talk** → say `rain in London` (Chrome mic)
 
 ## How to run
 

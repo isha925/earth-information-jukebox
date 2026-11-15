@@ -60,6 +60,31 @@ Prefer NASA POWER precipitation or temperature for any named place the user asks
 If no live numbers are provided, say so briefly and invite the listener to ask about rainfall in a city or global temperature.
 When precipitation is zero, say it is a dry day and do not describe rain sounds.`;
 
+function buildSystemInstruction(replyLanguage) {
+  const lang = String(replyLanguage || "en-US").trim() || "en-US";
+  if (/^en([-_]|$)/i.test(lang)) {
+    return SYSTEM_INSTRUCTION;
+  }
+
+  return (
+    `${SYSTEM_INSTRUCTION}\n\n` +
+    `Speak the entire reply in the language for BCP-47 tag ${lang}. ` +
+    `Keep NASA place names, units, and numbers accurate and easy to speak aloud. ` +
+    `If you cannot reliably use that language, reply in clear English instead.`
+  );
+}
+
+function normalizeReplyLanguage(value) {
+  const text = String(value || "").trim();
+  if (!text || text.length > 16) {
+    return "en-US";
+  }
+  if (!/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(text)) {
+    return "en-US";
+  }
+  return text;
+}
+
 if (!GEMINI_API_KEY) {
   console.warn(
     "GEMINI_API_KEY is not set. The page will load, but the PA cannot answer until you add it to .env (see .env.example)."
@@ -717,6 +742,7 @@ async function attachNasaContext(message) {
       availabilityNote: power.availabilityNote,
       place: power.location.name,
       placeLabel,
+      country: power.location.country || "",
       lat: power.location.lat,
       lon: power.location.lon,
       trackId: power.trackId,
@@ -748,7 +774,8 @@ async function attachNasaContext(message) {
 }
 
 app.post("/api/chat", async (req, res) => {
-  const { message, history } = req.body ?? {};
+  const { message, history, replyLanguage } = req.body ?? {};
+  const language = normalizeReplyLanguage(replyLanguage);
 
   if (typeof message !== "string" || !message.trim()) {
     return res.status(400).json({ error: "No message received." });
@@ -772,7 +799,12 @@ app.post("/api/chat", async (req, res) => {
   if (!ai) {
     const fallback = fallbackReplyFromSonify(sonify);
     if (fallback) {
-      return res.json({ reply: fallback, sonify, fallback: true });
+      return res.json({
+        reply: fallback,
+        sonify,
+        fallback: true,
+        replyLanguage: "en-US"
+      });
     }
 
     return res.status(503).json({
@@ -793,7 +825,7 @@ app.post("/api/chat", async (req, res) => {
           { role: "user", parts: [{ text: prompt }] }
         ],
         config: {
-          systemInstruction: SYSTEM_INSTRUCTION
+          systemInstruction: buildSystemInstruction(language)
         }
       }),
       12000,
@@ -805,7 +837,12 @@ app.post("/api/chat", async (req, res) => {
     if (!reply) {
       const fallback = fallbackReplyFromSonify(sonify);
       if (fallback) {
-        return res.json({ reply: fallback, sonify, fallback: true });
+        return res.json({
+          reply: fallback,
+          sonify,
+          fallback: true,
+          replyLanguage: "en-US"
+        });
       }
 
       console.error(
@@ -820,13 +857,18 @@ app.post("/api/chat", async (req, res) => {
       });
     }
 
-    res.json({ reply, sonify, fallback: false });
+    res.json({ reply, sonify, fallback: false, replyLanguage: language });
   } catch (error) {
     logGeminiError(error);
 
     const fallback = fallbackReplyFromSonify(sonify);
     if (fallback) {
-      return res.json({ reply: fallback, sonify, fallback: true });
+      return res.json({
+        reply: fallback,
+        sonify,
+        fallback: true,
+        replyLanguage: "en-US"
+      });
     }
 
     if (error.status === 429 || error.status === 503) {

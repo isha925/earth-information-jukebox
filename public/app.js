@@ -14,11 +14,56 @@ const earthScene = document.getElementById("earthScene");
 const citationLine = document.getElementById("citationLine");
 const trackLabel = document.getElementById("trackLabel");
 const intensityBar = document.getElementById("intensityBar");
+const replyLanguageSelect = document.getElementById("replyLanguage");
+const voiceSupportNote = document.getElementById("voiceSupportNote");
 
-const LANGUAGE = "en-US";
+const FALLBACK_LANGUAGE = "en-US";
 const REQUEST_TIMEOUT_MS = 20000;
 const MAX_HISTORY_MESSAGES = 20;
 const RAIN_DURATION_SEC = 8;
+
+// Preferred reply language by country / place (BCP-47). Used when Speak = Auto.
+const COUNTRY_REPLY_LANGUAGE = {
+  Nepal: "ne-NP",
+  Japan: "ja-JP",
+  India: "hi-IN",
+  Egypt: "ar-EG",
+  "Saudi Arabia": "ar-SA",
+  "United Arab Emirates": "ar-AE",
+  Spain: "es-ES",
+  Mexico: "es-MX",
+  France: "fr-FR",
+  Brazil: "pt-BR",
+  Portugal: "pt-PT",
+  China: "zh-CN",
+  Kenya: "sw-KE",
+  Tanzania: "sw-TZ",
+  Nigeria: "en-NG",
+  "United Kingdom": "en-GB",
+  "United States": "en-US",
+  Australia: "en-AU",
+  Singapore: "en-SG",
+  Bangladesh: "bn-BD"
+};
+
+const PLACE_REPLY_LANGUAGE = {
+  kathmandu: "ne-NP",
+  pokhara: "ne-NP",
+  tokyo: "ja-JP",
+  mumbai: "hi-IN",
+  delhi: "hi-IN",
+  "new delhi": "hi-IN",
+  chennai: "hi-IN",
+  cairo: "ar-EG",
+  miami: "en-US",
+  london: "en-GB",
+  paris: "fr-FR",
+  "sao paulo": "pt-BR",
+  "mexico city": "es-MX",
+  nairobi: "sw-KE",
+  beijing: "zh-CN",
+  dhaka: "bn-BD"
+};
 
 const SpeechRecognition =
   window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -179,7 +224,93 @@ async function playUnlockChirp() {
   activeNodes.push(osc);
 }
 
-function speak(text) {
+function getSynthVoices() {
+  if (!synth) {
+    return [];
+  }
+  return synth.getVoices() || [];
+}
+
+function findVoiceForLanguage(lang) {
+  const voices = getSynthVoices();
+  if (!voices.length || !lang) {
+    return null;
+  }
+  const wanted = String(lang).toLowerCase();
+  const base = wanted.split("-")[0];
+  return (
+    voices.find((voice) => voice.lang.toLowerCase() === wanted) ||
+    voices.find((voice) => voice.lang.toLowerCase().startsWith(`${base}-`)) ||
+    voices.find((voice) => voice.lang.toLowerCase().startsWith(base)) ||
+    null
+  );
+}
+
+function isLanguageVoiceSupported(lang) {
+  if (!lang || lang.toLowerCase().startsWith("en")) {
+    return Boolean(findVoiceForLanguage(lang || FALLBACK_LANGUAGE) || getSynthVoices().length);
+  }
+  return Boolean(findVoiceForLanguage(lang));
+}
+
+function preferredLanguageForPlace(placeName, country) {
+  if (country && COUNTRY_REPLY_LANGUAGE[country]) {
+    return COUNTRY_REPLY_LANGUAGE[country];
+  }
+  const key = String(placeName || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (key && PLACE_REPLY_LANGUAGE[key]) {
+    return PLACE_REPLY_LANGUAGE[key];
+  }
+  return FALLBACK_LANGUAGE;
+}
+
+function resolveReplyLanguage(placeHint = {}) {
+  const selected = replyLanguageSelect?.value || "auto";
+  let preferred = selected;
+  if (selected === "auto") {
+    preferred = preferredLanguageForPlace(placeHint.name, placeHint.country);
+  }
+
+  if (isLanguageVoiceSupported(preferred)) {
+    return {
+      preferred,
+      effective: preferred,
+      fellBackToEnglish: false,
+      voice: findVoiceForLanguage(preferred)
+    };
+  }
+
+  return {
+    preferred,
+    effective: FALLBACK_LANGUAGE,
+    fellBackToEnglish: preferred !== FALLBACK_LANGUAGE,
+    voice: findVoiceForLanguage(FALLBACK_LANGUAGE)
+  };
+}
+
+function updateVoiceSupportNote(placeHint = {}) {
+  if (!voiceSupportNote) {
+    return;
+  }
+  const resolved = resolveReplyLanguage(placeHint);
+  if (resolved.fellBackToEnglish) {
+    voiceSupportNote.textContent =
+      `No ${resolved.preferred} voice on this device — speaking English.`;
+  } else if ((replyLanguageSelect?.value || "auto") === "auto") {
+    voiceSupportNote.textContent =
+      resolved.effective === FALLBACK_LANGUAGE
+        ? "Auto: English"
+        : `Auto: ${resolved.effective} (voice available)`;
+  } else {
+    voiceSupportNote.textContent = `Voice: ${resolved.effective}`;
+  }
+  return resolved;
+}
+
+function speak(text, lang = FALLBACK_LANGUAGE) {
   if (!synth || !text) {
     return;
   }
@@ -187,21 +318,26 @@ function speak(text) {
   synth.cancel();
 
   const start = () => {
-    const sentences = text.match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g) || [text];
+    const resolvedLang = isLanguageVoiceSupported(lang) ? lang : FALLBACK_LANGUAGE;
+    const voice = findVoiceForLanguage(resolvedLang);
+    const sentences = text.match(/[^.!?。！？]+[.!?。！？]+["')\]]*|[^.!?。！？]+$/g) || [text];
     for (const sentence of sentences) {
       const trimmed = sentence.trim();
       if (!trimmed) {
         continue;
       }
       const utterance = new SpeechSynthesisUtterance(trimmed);
-      utterance.lang = LANGUAGE;
+      utterance.lang = resolvedLang;
+      if (voice) {
+        utterance.voice = voice;
+      }
       utterance.rate = 1.02;
       utterance.volume = 1;
       synth.speak(utterance);
     }
   };
 
-  const voices = synth.getVoices();
+  const voices = getSynthVoices();
   if (!voices.length) {
     synth.addEventListener("voiceschanged", start, { once: true });
     setTimeout(start, 250);
@@ -491,6 +627,7 @@ async function playNasaDirect(kind, question = "") {
       availabilityNote: data.availabilityNote,
       place: data.location?.name,
       placeLabel,
+      country: data.location?.country || "",
       lat: data.location?.lat,
       lon: data.location?.lon,
       trackId: data.trackId,
@@ -498,6 +635,7 @@ async function playNasaDirect(kind, question = "") {
       citation: data.source?.citation
     };
     // One short spoken line only — chat must not speak a second overlapping summary.
+    // English factual line; Gemini may localize the spoken reply when a regional voice exists.
     const rainMm = Number(data.rainfall) || 0;
     const reply = isDryPrecipitation(rainMm)
       ? `For ${placeLabel} on ${niceDate}, NASA POWER shows no measurable rainfall — zero millimeters per day — ` +
@@ -576,6 +714,12 @@ async function askPA(question) {
     statusMessage.textContent = error.message;
   }
 
+  const placeHint = {
+    name: direct?.sonify?.place || extractPlaceFromQuestion(trimmed) || "",
+    country: direct?.sonify?.country || ""
+  };
+  const langPlan = updateVoiceSupportNote(placeHint) || resolveReplyLanguage(placeHint);
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -583,7 +727,11 @@ async function askPA(question) {
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: trimmed, history }),
+      body: JSON.stringify({
+        message: trimmed,
+        history,
+        replyLanguage: langPlan.effective
+      }),
       signal: controller.signal
     });
 
@@ -599,17 +747,23 @@ async function askPA(question) {
     );
     history.splice(0, Math.max(0, history.length - MAX_HISTORY_MESSAGES));
 
-    // Prefer a single spoken answer. If Gemini only repeats the POWER facts we
-    // already have, keep the shorter direct line to avoid laggy double-talk.
+    // Prefer a single spoken answer. English NASA fallback stays English if Gemini failed.
     let finalReply = data.reply;
+    let speakLang = data.replyLanguage || langPlan.effective;
     if (direct?.reply && data.fallback) {
       finalReply = direct.reply;
+      speakLang = FALLBACK_LANGUAGE;
     }
 
     paMessage.textContent = finalReply;
+    const langNote = langPlan.fellBackToEnglish
+      ? ` · voice fallback English (no ${langPlan.preferred})`
+      : speakLang !== FALLBACK_LANGUAGE
+        ? ` · speaking ${speakLang}`
+        : "";
     statusMessage.textContent = data.fallback
-      ? `Latest available POWER data. You asked: “${trimmed}”`
-      : `You asked: “${trimmed}”`;
+      ? `Latest available POWER data. You asked: “${trimmed}”${langNote}`
+      : `You asked: “${trimmed}”${langNote}`;
 
     // Don't restart rain/tone if already playing from the direct NASA path.
     if (data.sonify && !(direct && data.sonify.type === direct.sonify?.type)) {
@@ -619,16 +773,16 @@ async function askPA(question) {
     if (synth) {
       synth.cancel();
     }
-    speak(finalReply);
+    speak(finalReply, speakLang);
   } catch (error) {
     console.error("CHAT ERROR:", error);
     if (direct?.reply) {
       statusMessage.textContent =
-        "Played the latest available POWER day. Spoken summary used local NASA text.";
+        "Played the latest available POWER day. Spoken summary used English NASA text.";
       if (synth) {
         synth.cancel();
       }
-      speak(direct.reply);
+      speak(direct.reply, FALLBACK_LANGUAGE);
     } else {
       let message = error.message;
       if (error.name === "AbortError") {
@@ -637,7 +791,7 @@ async function askPA(question) {
         message = "I can't reach the Jukebox server. Please check that it's running.";
       }
       statusMessage.textContent = message;
-      speak(message);
+      speak(message, FALLBACK_LANGUAGE);
     }
   } finally {
     clearTimeout(timer);
@@ -656,7 +810,7 @@ function createRecognition() {
   }
 
   const instance = new Ctor();
-  instance.lang = LANGUAGE;
+  instance.lang = FALLBACK_LANGUAGE;
   instance.continuous = false;
   instance.interimResults = false;
   instance.maxAlternatives = 1;
@@ -818,4 +972,17 @@ if (stopAudioBtn) {
   });
 }
 
+if (replyLanguageSelect) {
+  replyLanguageSelect.addEventListener("change", () => {
+    updateVoiceSupportNote({});
+  });
+}
+
+if (synth) {
+  synth.addEventListener("voiceschanged", () => {
+    updateVoiceSupportNote({});
+  });
+}
+
+updateVoiceSupportNote({});
 loadDefaultTrack();

@@ -40,6 +40,24 @@
           Ask global temperature to hear GISTEMP as a rising tone.
         </p>
 
+        <div class="lang-row">
+          <label for="replyLanguage">Speak reply in</label>
+          <select id="replyLanguage" name="replyLanguage">
+            <option value="auto" selected>Auto (regional by place, else English)</option>
+            <option value="en-US">English</option>
+            <option value="ne-NP">Nepali</option>
+            <option value="hi-IN">Hindi</option>
+            <option value="ja-JP">Japanese</option>
+            <option value="ar-EG">Arabic</option>
+            <option value="es-ES">Spanish</option>
+            <option value="fr-FR">French</option>
+            <option value="pt-BR">Portuguese</option>
+            <option value="zh-CN">Chinese (Mandarin)</option>
+            <option value="sw-KE">Swahili</option>
+          </select>
+          <span id="voiceSupportNote" class="voice-note" aria-live="polite"></span>
+        </div>
+
         <form id="askForm" class="ask-form">
           <label class="sr-only" for="askInput">Ask the jukebox</label>
           <input

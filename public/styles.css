@@ -204,6 +204,40 @@ h1 {
   line-height: 1.55;
 }
 
+.lang-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+  color: #c5d3e0;
+  font-size: 0.86rem;
+}
+
+.lang-row label {
+  font-weight: 600;
+}
+
+#replyLanguage {
+  min-width: min(100%, 280px);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink);
+  font: inherit;
+}
+
+#replyLanguage:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.voice-note {
+  color: #9fb6c9;
+  font-size: 0.78rem;
+}
+
 .ask-form {
   display: grid;
   grid-template-columns: 1fr auto auto;

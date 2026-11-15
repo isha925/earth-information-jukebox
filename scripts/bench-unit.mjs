@@ -88,6 +88,16 @@ if (!/extractPlaceFromQuestion|place=/.test(appJs)) {
   ok("any-place", "place passed to POWER");
 }
 
+if (
+  !/function resolveReplyLanguage/.test(appJs) ||
+  !/function isLanguageVoiceSupported/.test(appJs) ||
+  !/FALLBACK_LANGUAGE/.test(appJs)
+) {
+  fail("regional-voice", "regional speak + English fallback missing");
+} else {
+  ok("regional-voice", "auto regional TTS with English fallback");
+}
+
 if (failures.length) {
   console.error(`\n${failures.length} unit failure(s)`);
   process.exit(1);
