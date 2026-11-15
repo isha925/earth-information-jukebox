@@ -1109,7 +1109,8 @@ app.post("/api/chat", async (req, res) => {
 
     if (error.status === 429 || error.status === 503) {
       return res.status(error.status).json({
-        error: "I'm getting a lot of questions right now. Please try again in a moment."
+        error:
+          "Google's servers look busy or not responding. Try again in a few minutes."
       });
     }
 
