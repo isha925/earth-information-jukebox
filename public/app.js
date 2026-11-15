@@ -231,6 +231,23 @@ function getSynthVoices() {
   return synth.getVoices() || [];
 }
 
+// Closest installed voices when the exact regional voice is missing.
+// Nepali (ne) is rarely packaged; Hindi Devanagari voices can still speak Nepali text.
+const RELATED_VOICE_LANGUAGES = {
+  "ne-np": ["ne-NP", "ne", "hi-IN", "hi"],
+  ne: ["ne-NP", "ne", "hi-IN", "hi"],
+  "hi-in": ["hi-IN", "hi"],
+  hi: ["hi-IN", "hi"],
+  "bn-bd": ["bn-BD", "bn-IN", "bn", "hi-IN"],
+  bn: ["bn-BD", "bn-IN", "bn", "hi-IN"],
+  "ar-eg": ["ar-EG", "ar-SA", "ar"],
+  "ar-sa": ["ar-SA", "ar-EG", "ar"],
+  "ar-ae": ["ar-AE", "ar-SA", "ar"],
+  "zh-cn": ["zh-CN", "zh-TW", "zh"],
+  "sw-ke": ["sw-KE", "sw", "en-KE", "en-US"],
+  "sw-tz": ["sw-TZ", "sw", "en-KE", "en-US"]
+};
+
 function findVoiceForLanguage(lang) {
   const voices = getSynthVoices();
   if (!voices.length || !lang) {
@@ -240,17 +257,42 @@ function findVoiceForLanguage(lang) {
   const base = wanted.split("-")[0];
   return (
     voices.find((voice) => voice.lang.toLowerCase() === wanted) ||
+    voices.find((voice) => voice.lang.toLowerCase().replace("_", "-") === wanted) ||
     voices.find((voice) => voice.lang.toLowerCase().startsWith(`${base}-`)) ||
     voices.find((voice) => voice.lang.toLowerCase().startsWith(base)) ||
+    voices.find((voice) => voice.lang.toLowerCase().replace("_", "-").startsWith(base)) ||
     null
   );
 }
 
-function isLanguageVoiceSupported(lang) {
-  if (!lang || lang.toLowerCase().startsWith("en")) {
-    return Boolean(findVoiceForLanguage(lang || FALLBACK_LANGUAGE) || getSynthVoices().length);
+function pickSpeakVoice(lang) {
+  const preferred = String(lang || FALLBACK_LANGUAGE);
+  const key = preferred.toLowerCase();
+  const base = key.split("-")[0];
+  const candidates = RELATED_VOICE_LANGUAGES[key] ||
+    RELATED_VOICE_LANGUAGES[base] ||
+    [preferred, base, FALLBACK_LANGUAGE];
+
+  for (const candidate of candidates) {
+    const voice = findVoiceForLanguage(candidate);
+    if (voice) {
+      return {
+        voice,
+        voiceLang: voice.lang || candidate,
+        exact: candidate.toLowerCase().startsWith(base),
+        usedRelated: !candidate.toLowerCase().startsWith(base) && base !== "en"
+      };
+    }
   }
-  return Boolean(findVoiceForLanguage(lang));
+
+  const english = findVoiceForLanguage(FALLBACK_LANGUAGE);
+  return {
+    voice: english,
+    voiceLang: FALLBACK_LANGUAGE,
+    exact: false,
+    usedRelated: false,
+    fellBackToEnglish: true
+  };
 }
 
 function preferredLanguageForPlace(placeName, country) {
@@ -274,20 +316,16 @@ function resolveReplyLanguage(placeHint = {}) {
     preferred = preferredLanguageForPlace(placeHint.name, placeHint.country);
   }
 
-  if (isLanguageVoiceSupported(preferred)) {
-    return {
-      preferred,
-      effective: preferred,
-      fellBackToEnglish: false,
-      voice: findVoiceForLanguage(preferred)
-    };
-  }
-
+  // Content language stays preferred (e.g. Nepali). Voice may use a related pack.
+  const spoken = pickSpeakVoice(preferred);
   return {
     preferred,
-    effective: FALLBACK_LANGUAGE,
-    fellBackToEnglish: preferred !== FALLBACK_LANGUAGE,
-    voice: findVoiceForLanguage(FALLBACK_LANGUAGE)
+    effective: preferred,
+    speakLang: spoken.fellBackToEnglish ? FALLBACK_LANGUAGE : preferred,
+    voice: spoken.voice,
+    voiceLang: spoken.voiceLang,
+    usedRelatedVoice: Boolean(spoken.usedRelated),
+    fellBackToEnglish: Boolean(spoken.fellBackToEnglish)
   };
 }
 
@@ -296,16 +334,19 @@ function updateVoiceSupportNote(placeHint = {}) {
     return;
   }
   const resolved = resolveReplyLanguage(placeHint);
-  if (resolved.fellBackToEnglish) {
+  if (resolved.fellBackToEnglish && resolved.preferred !== FALLBACK_LANGUAGE) {
     voiceSupportNote.textContent =
-      `No ${resolved.preferred} voice on this device — speaking English.`;
+      `No ${resolved.preferred} voice installed — reply will be English.`;
+  } else if (resolved.usedRelatedVoice) {
+    voiceSupportNote.textContent =
+      `Reply in ${resolved.preferred}; speaking with ${resolved.voice?.name || resolved.voiceLang} (closest installed voice).`;
   } else if ((replyLanguageSelect?.value || "auto") === "auto") {
     voiceSupportNote.textContent =
       resolved.effective === FALLBACK_LANGUAGE
         ? "Auto: English"
-        : `Auto: ${resolved.effective} (voice available)`;
+        : `Auto: ${resolved.effective}`;
   } else {
-    voiceSupportNote.textContent = `Voice: ${resolved.effective}`;
+    voiceSupportNote.textContent = `Reply + voice: ${resolved.effective}`;
   }
   return resolved;
 }
@@ -318,18 +359,22 @@ function speak(text, lang = FALLBACK_LANGUAGE) {
   synth.cancel();
 
   const start = () => {
-    const resolvedLang = isLanguageVoiceSupported(lang) ? lang : FALLBACK_LANGUAGE;
-    const voice = findVoiceForLanguage(resolvedLang);
-    const sentences = text.match(/[^.!?。！？]+[.!?。！？]+["')\]]*|[^.!?。！？]+$/g) || [text];
+    const picked = pickSpeakVoice(lang);
+    // Keep utterance language as the reply language when possible so Devanagari
+    // Nepali is not forced through an English voice pipeline.
+    const utteranceLang = picked.fellBackToEnglish ? FALLBACK_LANGUAGE : lang;
+    const sentences = text.match(/[^.!?।৷。！？]+[.!?।৷。！？]+["')\]]*|[^.!?।৷。！？]+$/g) || [
+      text
+    ];
     for (const sentence of sentences) {
       const trimmed = sentence.trim();
       if (!trimmed) {
         continue;
       }
       const utterance = new SpeechSynthesisUtterance(trimmed);
-      utterance.lang = resolvedLang;
-      if (voice) {
-        utterance.voice = voice;
+      utterance.lang = utteranceLang;
+      if (picked.voice) {
+        utterance.voice = picked.voice;
       }
       utterance.rate = 1.02;
       utterance.volume = 1;
@@ -730,7 +775,8 @@ async function askPA(question) {
       body: JSON.stringify({
         message: trimmed,
         history,
-        replyLanguage: langPlan.effective
+        // Ask Gemini for the selected language even if we must borrow a related voice.
+        replyLanguage: langPlan.fellBackToEnglish ? FALLBACK_LANGUAGE : langPlan.preferred
       }),
       signal: controller.signal
     });
@@ -749,18 +795,21 @@ async function askPA(question) {
 
     // Prefer a single spoken answer. English NASA fallback stays English if Gemini failed.
     let finalReply = data.reply;
-    let speakLang = data.replyLanguage || langPlan.effective;
+    let speakLang = data.replyLanguage || langPlan.speakLang || langPlan.preferred;
     if (direct?.reply && data.fallback) {
+      // Local NASA template is English-only; keep numbers honest rather than fake Nepali.
       finalReply = direct.reply;
       speakLang = FALLBACK_LANGUAGE;
     }
 
     paMessage.textContent = finalReply;
     const langNote = langPlan.fellBackToEnglish
-      ? ` · voice fallback English (no ${langPlan.preferred})`
-      : speakLang !== FALLBACK_LANGUAGE
-        ? ` · speaking ${speakLang}`
-        : "";
+      ? ` · no regional voice installed, English`
+      : langPlan.usedRelatedVoice
+        ? ` · ${langPlan.preferred} text via ${langPlan.voice?.name || langPlan.voiceLang}`
+        : speakLang !== FALLBACK_LANGUAGE
+          ? ` · speaking ${speakLang}`
+          : "";
     statusMessage.textContent = data.fallback
       ? `Latest available POWER data. You asked: “${trimmed}”${langNote}`
       : `You asked: “${trimmed}”${langNote}`;

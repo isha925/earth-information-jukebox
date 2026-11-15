@@ -90,12 +90,13 @@ if (!/extractPlaceFromQuestion|place=/.test(appJs)) {
 
 if (
   !/function resolveReplyLanguage/.test(appJs) ||
-  !/function isLanguageVoiceSupported/.test(appJs) ||
+  !/function pickSpeakVoice/.test(appJs) ||
+  !/RELATED_VOICE_LANGUAGES/.test(appJs) ||
   !/FALLBACK_LANGUAGE/.test(appJs)
 ) {
-  fail("regional-voice", "regional speak + English fallback missing");
+  fail("regional-voice", "regional speak + related-voice fallback missing");
 } else {
-  ok("regional-voice", "auto regional TTS with English fallback");
+  ok("regional-voice", "Nepali can borrow Hindi voice; English only if needed");
 }
 
 if (failures.length) {

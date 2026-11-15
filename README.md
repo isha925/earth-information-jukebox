@@ -1,126 +1,233 @@
 # Earth Information Jukebox
 
-**NASA Space Apps Challenge 2026** — *The Earth Information Jukebox*
+A small web app for the **NASA Space Apps Challenge 2026** challenge *The Earth Information Jukebox*.
 
-Turn NASA Earth science into something you can **see, hear, and ask**.
+It lets you **see** a NASA Earth Information Center picture, **hear** real NASA rainfall or global temperature as sound, and **ask** questions by typing or talking.
 
-Demo (local): [http://localhost:3000](http://localhost:3000)
+Open locally after setup: [http://localhost:3000](http://localhost:3000)
 
 ---
 
-## The problem
+## What this project is (in plain words)
 
-Monsoon rainfall and climate risk are often locked behind charts, dashboards, and jargon.
-People anywhere — Kathmandu flood season, Miami storm week, Tokyo wet day — need a faster gut-check:
+Weather and climate data are usually charts. This app turns them into something you can listen to.
 
-> How wet is *this place* right now? How does that sit against planetary warming?
+Example: ask about rain in Kathmandu or Tokyo. The app:
 
-Sight-only tools also shut out people who learn better by listening — or who cannot easily read dense visual dashboards.
+1. Finds that place on a map (latitude / longitude)
+2. Downloads NASA POWER rainfall and temperature for that spot
+3. Plays a rain sound if there was rain (or a calm sound if it was dry — **0 mm is not played as rain**)
+4. Keeps a real NASA science image on screen (not a random stock photo)
+5. Speaks a short summary out loud (you can pick Nepali, Japanese, etc.)
 
-## The solution
+You can also ask about **global temperature** — that uses NASA GISTEMP and plays a tone that rises with the warming number.
 
-**Earth Information Jukebox** pairs official **NASA Earth Information Center (EIC)** visualizations with **on-the-fly sonification** of NASA observation data, plus a short spoken answer.
+---
 
-1. An EIC / SVS science frame fills the screen (not stock photography).
-2. Name any place → geocode → NASA POWER point rainfall/temperature → rain soundscape **only if precip > 0** (dry day → calm cue, not fake rain).
-3. NASA GISTEMP v4 global temperature anomaly drives a pitch-mapped tone.
-4. Ask or Talk: Gemini narrates the numbers (with a local NASA fallback if Gemini is overloaded).
-5. **Speak reply in** a regional language when the browser has a matching voice (Auto picks by place — e.g. Nepal → Nepali, Japan → Japanese); otherwise it **falls back to English** automatically.
+## What is in this folder
 
-That is the challenge brief, solved for a concrete human need: **ask anywhere, hear honest Earth numbers**.
-
-## Why this can win
-
-| Prize signal | How we hit it |
+| Item | What it is |
 | --- | --- |
-| Solves a real problem | Kathmandu monsoon / flood awareness + accessible Earth literacy |
-| Uses required NASA path | EIC/SVS frames + POWER + GISTEMP (see `DATASETS.md`) |
-| Multi-sensory | Sight (EIC) + sound (sonify) + voice (Ask/Talk) |
-| Demoable in 60 seconds | One click → rain; one phrase → dated POWER; one click → GISTEMP |
-| Honest science | Shows POWER lag (“latest available day”) instead of faking “live now” |
+| `server.js` | The backend. Talks to NASA and Gemini, serves the web page |
+| `public/` | The website you see in the browser (`index.html`, `app.js`, `styles.css`) |
+| `.env.example` | Template for your secret keys (copy this to `.env`) |
+| `.env` | Your real keys (do **not** commit this; it stays on your computer) |
+| `DATASETS.md` | Which NASA datasets we use and why they count for the challenge |
+| `package.json` | Node project settings and scripts (`npm start`, `npm test`) |
+| `scripts/` | Automated checks so the demo path keeps working |
+| `README.md` | This guide |
 
-## NASA datasets used
+You do **not** need to edit the code to run a demo. You mainly need Node.js, a Gemini key, and Chrome.
 
-Full citations and eligibility notes: **[`DATASETS.md`](./DATASETS.md)**
+---
 
-| Layer | Source | Role |
-| --- | --- | --- |
-| Visual | [NASA SVS EIC gallery](https://svs.gsfc.nasa.gov/gallery/earth-information-center/) · [SVS 4960 atmospheric river](https://svs.gsfc.nasa.gov/4960/) | Dominant on-screen Earth story |
-| Local water | [NASA POWER daily point](https://power.larc.nasa.gov/) `PRECTOTCORR`, `T2M` for Kathmandu | Rain sonification + spoken summary |
-| Global climate | [NASA GISS GISTEMP v4](https://data.giss.nasa.gov/gistemp/) | Temperature anomaly tone |
-| Optional key check | [api.nasa.gov](https://api.nasa.gov/) | Validates `NASA_API_KEY` (not required for POWER/GISTEMP/SVS) |
+## How it works (simple flow)
 
-**Compliance:** We keep EIC frames as the visual plane and map underlying NASA numeric series to sound — aligned with Space Apps Connect GO-team guidance (#1844).
+```
+You ask “rain in Tokyo”
+        ↓
+Browser sends the question to our server
+        ↓
+Server finds Tokyo’s coordinates
+        ↓
+Server asks NASA POWER for rain + temperature there
+        ↓
+Browser plays sound (rain if mm > 0, calm if dry)
+        ↓
+Gemini (or a local NASA sentence if Gemini is busy) speaks a short answer
+```
 
-## Demo script (for judges)
+**Important honesty rules built in:**
 
-1. Open Chrome → `http://localhost:3000`
-2. Click **Hear Kathmandu rain** or **Hear Tokyo rain**  
-   - Place is geocoded on the fly → NASA POWER for that lat/lon  
-   - Rain noise only if mm/day > 0; otherwise a dry-day calm cue  
-   - One short spoken summary (no double-talk)
-3. Ask any place/date: `rain in Miami` · `Pokhara yesterday` · `Tokyo rain on November 10`  
-   - Dated POWER query; UI explains lag / nearest available day
-4. Click **Hear global warming tone**  
-   - GISTEMP anomaly → pitch
-5. Optional: set **Speak reply in** to Auto / Nepali / Japanese / … (falls back to English if that voice is missing)
-6. Optional: **Talk** → say `rain in London` (Chrome mic)
+- Background image = NASA SVS / Earth Information Center (see `DATASETS.md`)
+- Numbers = NASA POWER or GISTEMP
+- If rainfall is **0**, you hear a dry cue — not fake rain
+- NASA POWER often lags a few days; the UI says “latest available day”
+- If Nepali (or another language) has no matching system voice, the app tries a close voice (for Nepali, often Hindi) before falling back to English
 
-## How to run
+---
+
+## Before you start (checklist)
+
+1. A Mac or PC with a terminal
+2. [Node.js](https://nodejs.org/) installed (version 18 or newer is fine)
+3. [Google Chrome](https://www.google.com/chrome/) or Edge (needed for Talk / microphone)
+4. A free Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey)
+5. (Optional) a NASA API key from [api.nasa.gov](https://api.nasa.gov/) — **not required** for the main rain / temperature demo
+
+---
+
+## Step-by-step: run the app for the first time
+
+### Step 1 — Open the project folder
+
+In Terminal:
 
 ```bash
-cd /Users/amit/github/earth-information-jukebox
+cd /path/to/earth-information-jukebox
+```
+
+(Use the real path on your machine.)
+
+### Step 2 — Create your secret key file
+
+```bash
 cp .env.example .env
-# Required: GEMINI_API_KEY + GEMINI_MODEL=gemini-3.8-flash
-# Optional: NASA_API_KEY (api.nasa.gov)
+```
+
+Open `.env` in any text editor and set:
+
+```bash
+GEMINI_API_KEY=paste-your-key-here
+GEMINI_MODEL=gemini-3.8-flash
+```
+
+Save the file.
+
+Optional later:
+
+```bash
+NASA_API_KEY=paste-nasa-key-here
+```
+
+### Step 3 — Install dependencies
+
+```bash
 npm install
+```
+
+Wait until it finishes. You only need this again if `package.json` changes.
+
+### Step 4 — Start the server
+
+```bash
 env -u GEMINI_API_KEY -u GOOGLE_API_KEY npm start
 ```
 
-Open **http://localhost:3000** in Chrome or Edge.
+Why `env -u ...`? Sometimes your Terminal already has an old Gemini key. Clearing those names makes the app use the key inside `.env`.
 
-### Environment
+You should see something like “listening on port 3000”.
 
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `GEMINI_API_KEY` | Yes for Gemini narration | Google AI Studio key |
-| `GEMINI_MODEL` | Recommended `gemini-3.8-flash` | Model id |
-| `NASA_API_KEY` | No for core demo | api.nasa.gov probe only |
-| `PORT` | No (default `3000`) | Server port |
+### Step 5 — Open the app
 
-> Tip: if your shell exports a stale `GEMINI_API_KEY`, start with `env -u GEMINI_API_KEY` so project `.env` wins.
+In Chrome, go to:
 
-## Architecture
+**http://localhost:3000**
+
+Do a hard refresh the first time (`Cmd+Shift+R` on Mac) so you get the latest page.
+
+### Step 6 — Try a 60-second demo
+
+1. Click **Hear Kathmandu rain**  
+   - You should hear a short chirp, then rain (or a dry cue if that day was 0 mm)  
+   - Numbers appear under the buttons
+2. Type `rain in Tokyo` and click **Ask**
+3. Click **Hear global warming tone**
+4. (Optional) Set **Speak reply in** to Nepali or Japanese, then Ask again
+5. (Optional) Click **Talk**, allow the mic, and say `Kathmandu rainfall`
+
+Click **Stop sound** anytime.
+
+---
+
+## What each button / control does
+
+| Control | What happens |
+| --- | --- |
+| **Ask** | Sends your typed question to the server |
+| **Talk** | Listens with the mic (Chrome), then asks the same way |
+| **Hear Kathmandu rain** | Quick demo for Kathmandu NASA POWER rain |
+| **Hear Tokyo rain** | Same idea for Tokyo |
+| **Hear global warming tone** | Plays NASA GISTEMP as a tone |
+| **Stop sound** | Stops rain / tone / speech |
+| **Speak reply in** | Chooses the spoken language (Auto picks from the place when it can) |
+
+---
+
+## Things that often confuse beginners
+
+**“It says latest day is a few days ago.”**  
+That is normal. NASA POWER daily data is not instant. The app shows the newest day NASA has published.
+
+**“I chose Nepali but it used another voice.”**  
+Many Macs/Chrome installs do not ship a Nepali voice. The app will still ask for a Nepali **text** reply when Gemini works, and may speak it with the closest installed voice (often Hindi). Only if nothing usable is installed does it fall back to English.
+
+**“Talk does nothing.”**  
+Use Chrome or Edge, stay on `http://localhost:3000`, and allow microphone access.
+
+**“I hear NASA… NASA… twice.”**  
+That bug was fixed — you should hear one spoken answer per ask.
+
+**“Gemini error / timeout.”**  
+The rain/temperature sound still plays from NASA. The spoken line may use a short local NASA sentence instead of Gemini.
+
+---
+
+## NASA data we use
+
+Details and challenge notes: **[DATASETS.md](./DATASETS.md)**
+
+| What you see / hear | NASA source |
+| --- | --- |
+| Big background picture | [NASA SVS Earth Information Center](https://svs.gsfc.nasa.gov/gallery/earth-information-center/) (item [4960](https://svs.gsfc.nasa.gov/4960/)) |
+| Local rain + temperature | [NASA POWER](https://power.larc.nasa.gov/) daily point data |
+| Global warming tone | [NASA GISTEMP v4](https://data.giss.nasa.gov/gistemp/) |
+
+Gemini is only the narrator. It is **not** the science source.
+
+---
+
+## Project layout (for when you are ready to peek at code)
 
 ```
 Browser (Chrome)
-  ├─ EIC/SVS frame (CSS background from NASA SVS)
-  ├─ Web Audio sonification (rain / tone)
-  ├─ SpeechRecognition (Talk) + speechSynthesis (reply)
-  └─ fetch → Express API
-        ├─ GET  /api/nasa-weather[?date=]  → NASA POWER
-        ├─ GET  /api/gistemp              → GISTEMP v4
-        ├─ GET  /api/eic-tracks           → curated EIC pairings
-        ├─ GET  /api/nasa-key-check       → api.nasa.gov NEO probe
-        └─ POST /api/chat                 → Gemini + NASA context
-              └─ on 503/timeout → local NASA spoken fallback
+  ├─ NASA EIC image on screen
+  ├─ Web Audio (rain / dry cue / tone)
+  ├─ Speech (Talk + spoken reply)
+  └─ talks to Express server
+        ├─ /api/nasa-weather?place=&date=  → NASA POWER
+        ├─ /api/gistemp                   → GISTEMP
+        ├─ /api/eic-tracks                → which EIC images we pair
+        └─ /api/chat                      → Gemini + NASA context
 ```
 
-## Tests
+---
+
+## Tests (optional)
+
+With the server already running:
 
 ```bash
 npm test
-# equivalent to:
-npm run test:unit && npm run test:api && npm run test:browser && npm run live-check
 ```
 
-These benches assert EIC frame URLs, POWER/GISTEMP payloads, dated queries, spoken-date formatting, Talk wiring, and rain stop timing.
+That runs small automated checks for dates, NASA responses, Talk wiring, and rain stop behavior.
 
-## Space Apps challenge fit
+---
 
-Challenge: *build an Earth Jukebox that pairs EIC visual frames with dynamic sonifications generated in real time.*
+## Challenge fit (one sentence)
 
-We do that, and ground it in a civic use case (Kathmandu water awareness) so the science is not abstract. Gemini is assistive narration only — the science truth is NASA POWER / GISTEMP / EIC.
+We pair official NASA EIC visuals with live sonification of NASA POWER / GISTEMP numbers, so people can ask about a place and **hear** honest Earth data.
 
 ## Repository
 
