@@ -83,6 +83,17 @@ if (!/keepTalking|maybeContinueConversation|Alt/.test(appJs)) {
 }
 
 if (
+  !/function stopEverything/.test(appJs) ||
+  !/function bumpRunToken/.test(appJs) ||
+  !/recognitionOutcome === "aborted"/.test(appJs) ||
+  !/utterance\.onerror = \(\) => finish\(\)/.test(appJs)
+) {
+  fail("stop-hard-abort", "Stop must abort speech, mic, and continue-listen");
+} else {
+  ok("stop-hard-abort", "runToken + stopEverything + no speak-after-cancel");
+}
+
+if (
   !/function recognitionLanguageFor/.test(appJs) ||
   !/LISTEN_PROMPTS/.test(appJs) ||
   !/instance\.lang = sttLang/.test(appJs)

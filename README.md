@@ -146,7 +146,8 @@ You do **not** need to read the page.
 4. Speak your question (Talk listens in the matching speech language; Nepali uses Hindi listening because Chrome has no Nepali mic language)  
 5. Hear NASA data as sound + a spoken answer  
 6. If **Keep listening after each answer** is checked, it listens again  
-7. Say `stop listening` (or the local equivalent) or press **Talk** / **Stop sound** to pause  
+7. Say `stop listening` (or the local equivalent) or press **Talk** / **Stop** to pause  
+
 
 You can still type and press **Ask**, or use the quick buttons.
 
@@ -161,7 +162,7 @@ You can still type and press **Ask**, or use the quick buttons.
 | **Hear Kathmandu rain** | Quick demo for Kathmandu NASA POWER rain |
 | **Hear Tokyo rain** | Same idea for Tokyo |
 | **Hear global warming tone** | Plays NASA GISTEMP as a tone |
-| **Stop sound** | Stops rain / tone / speech |
+| **Stop** | Stops rain / tone / speech **and** listening (no more auto-listen) |
 | **Speak reply in** | Chooses the spoken language (Auto picks from the place when it can) |
 
 ---

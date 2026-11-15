@@ -26,6 +26,9 @@ const LISTEN_WATCHDOG_MS = 12000;
 
 let conversationActive = false;
 let suppressAutoListen = false;
+// Bumped by Stop / new asks so in-flight speak / continue / listen awaits bail out.
+let runToken = 0;
+let geminiSpeechWaitResolve = null;
 
 // Preferred reply language by country / place (BCP-47). Used when Speak = Auto.
 const COUNTRY_REPLY_LANGUAGE = {
@@ -158,6 +161,46 @@ function setBusy() {
 
 function keepTalkingEnabled() {
   return Boolean(keepTalkingCheckbox?.checked);
+}
+
+function bumpRunToken() {
+  runToken += 1;
+  return runToken;
+}
+
+function isCurrentRun(token) {
+  return token === runToken;
+}
+
+/** Hard stop: sound, speech, mic, and conversation auto-listen. */
+function stopEverything(statusText = "Stopped.") {
+  bumpRunToken();
+  suppressAutoListen = true;
+  conversationActive = false;
+  clearListeningWatchdog();
+  recognitionOutcome = "aborted";
+  if (recognition) {
+    try {
+      recognition.abort?.();
+    } catch (_error) {
+      // ignore
+    }
+    try {
+      recognition.stop();
+    } catch (_error) {
+      // ignore
+    }
+  }
+  stopActiveAudio();
+  if (synth) {
+    synth.cancel();
+  }
+  setIntensity(0.08);
+  if (state === "listening" || state === "thinking") {
+    setState("idle", statusText);
+  } else if (statusMessage) {
+    statusMessage.textContent = statusText;
+  }
 }
 
 function isStopListeningPhrase(text) {
@@ -455,10 +498,18 @@ let geminiSpeechUrl = null;
 let geminiSpeechAudio = null;
 
 function stopGeminiSpeech() {
+  if (geminiSpeechWaitResolve) {
+    const resolve = geminiSpeechWaitResolve;
+    geminiSpeechWaitResolve = null;
+    resolve({ stopped: true });
+  }
   if (geminiSpeechAudio) {
     try {
+      geminiSpeechAudio.onended = null;
+      geminiSpeechAudio.onerror = null;
       geminiSpeechAudio.pause();
-      geminiSpeechAudio.src = "";
+      geminiSpeechAudio.removeAttribute("src");
+      geminiSpeechAudio.load();
     } catch (_error) {
       // ignore
     }
@@ -521,32 +572,56 @@ function speakWithBrowser(text, lang = FALLBACK_LANGUAGE) {
   }
 }
 
-function speakWithGeminiTts(text, lang) {
+function speakWithGeminiTts(text, lang, token = runToken) {
   return fetch("/api/tts", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, language: lang })
   }).then(async (response) => {
+    if (!isCurrentRun(token)) {
+      return;
+    }
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
       throw new Error(err.error || `TTS HTTP ${response.status}`);
     }
     const blob = await response.blob();
+    if (!isCurrentRun(token)) {
+      return;
+    }
     stopGeminiSpeech();
     geminiSpeechUrl = URL.createObjectURL(blob);
     geminiSpeechAudio = new Audio(geminiSpeechUrl);
     geminiSpeechAudio.volume = 1;
     await new Promise((resolve, reject) => {
-      geminiSpeechAudio.onended = () => resolve();
-      geminiSpeechAudio.onerror = () => reject(new Error("Audio playback failed"));
-      geminiSpeechAudio.play().catch(reject);
+      geminiSpeechWaitResolve = () => resolve({ stopped: true });
+      geminiSpeechAudio.onended = () => {
+        geminiSpeechWaitResolve = null;
+        resolve({ stopped: false });
+      };
+      geminiSpeechAudio.onerror = () => {
+        geminiSpeechWaitResolve = null;
+        if (!isCurrentRun(token)) {
+          resolve({ stopped: true });
+          return;
+        }
+        reject(new Error("Audio playback failed"));
+      };
+      geminiSpeechAudio.play().catch((error) => {
+        geminiSpeechWaitResolve = null;
+        if (!isCurrentRun(token)) {
+          resolve({ stopped: true });
+          return;
+        }
+        reject(error);
+      });
     });
   });
 }
 
-function speakWithBrowserAndWait(text, lang = FALLBACK_LANGUAGE) {
+function speakWithBrowserAndWait(text, lang = FALLBACK_LANGUAGE, token = runToken) {
   return new Promise((resolve) => {
-    if (!synth || !text) {
+    if (!synth || !text || !isCurrentRun(token)) {
       resolve();
       return;
     }
@@ -570,6 +645,10 @@ function speakWithBrowserAndWait(text, lang = FALLBACK_LANGUAGE) {
       resolve();
     };
     const speakNext = () => {
+      if (!isCurrentRun(token)) {
+        finish();
+        return;
+      }
       if (index >= queue.length) {
         finish();
         return;
@@ -582,8 +661,15 @@ function speakWithBrowserAndWait(text, lang = FALLBACK_LANGUAGE) {
       }
       utterance.rate = 1.05;
       utterance.volume = 1;
-      utterance.onend = speakNext;
-      utterance.onerror = speakNext;
+      utterance.onend = () => {
+        if (!isCurrentRun(token)) {
+          finish();
+          return;
+        }
+        speakNext();
+      };
+      // cancel/interrupted must end the chain — never keep speaking after Stop.
+      utterance.onerror = () => finish();
       synth.speak(utterance);
     };
 
@@ -601,26 +687,33 @@ async function speak(text, lang = FALLBACK_LANGUAGE) {
   if (!text) {
     return;
   }
+  const token = runToken;
 
   stopGeminiSpeech();
   if (synth) {
     synth.cancel();
   }
+  if (!isCurrentRun(token)) {
+    return;
+  }
 
   if (!needsGeminiTts(lang)) {
-    await speakWithBrowserAndWait(text, lang);
+    await speakWithBrowserAndWait(text, lang, token);
     return;
   }
 
   try {
-    await speakWithGeminiTts(text, lang);
+    await speakWithGeminiTts(text, lang, token);
   } catch (error) {
+    if (!isCurrentRun(token)) {
+      return;
+    }
     console.error("Gemini TTS failed, using browser voice:", error);
     if (voiceSupportNote) {
       voiceSupportNote.textContent =
         `Cloud voice unavailable (${error.message}). Trying device voice.`;
     }
-    await speakWithBrowserAndWait(text, lang);
+    await speakWithBrowserAndWait(text, lang, token);
   }
 }
 
@@ -953,6 +1046,7 @@ async function askPA(question) {
   }
 
   // Stop previous rain + any queued speech so we never stack "NASA… NASA…"
+  const token = bumpRunToken();
   stopActiveAudio();
   if (synth) {
     synth.cancel();
@@ -960,6 +1054,10 @@ async function askPA(question) {
   clearListeningWatchdog();
   setState("thinking", `Working on: “${trimmed}”…`);
   await playUnlockChirp();
+  if (!isCurrentRun(token)) {
+    setState("idle", "Stopped.");
+    return;
+  }
 
   const lower = trimmed.toLowerCase();
   const wantsTemp =
@@ -1051,20 +1149,35 @@ async function askPA(question) {
       ? `Latest available POWER data. You asked: “${trimmed}”${langNote}`
       : `You asked: “${trimmed}”${langNote}`;
 
+    if (!isCurrentRun(token)) {
+      return;
+    }
+
     // Don't restart rain/tone if already playing from the direct NASA path.
     if (data.sonify && !(direct && data.sonify.type === direct.sonify?.type)) {
       await applySonify(data.sonify);
     }
+    if (!isCurrentRun(token)) {
+      return;
+    }
 
     await speak(finalReply, speakLang);
+    if (!isCurrentRun(token) || suppressAutoListen) {
+      return;
+    }
     await maybeContinueConversation(speakLang);
   } catch (error) {
     console.error("CHAT ERROR:", error);
+    if (!isCurrentRun(token)) {
+      return;
+    }
     if (direct?.reply) {
       statusMessage.textContent =
         "Played the latest available POWER day. Spoken summary used English NASA text.";
       await speak(direct.reply, FALLBACK_LANGUAGE);
-      await maybeContinueConversation(FALLBACK_LANGUAGE);
+      if (isCurrentRun(token) && !suppressAutoListen) {
+        await maybeContinueConversation(FALLBACK_LANGUAGE);
+      }
     } else {
       let message = error.message;
       if (error.name === "AbortError") {
@@ -1077,11 +1190,14 @@ async function askPA(question) {
     }
   } finally {
     clearTimeout(timer);
-    setState("idle");
+    if (state === "thinking") {
+      setState("idle");
+    }
   }
 }
 
 async function maybeContinueConversation(speakLang) {
+  const token = runToken;
   if (!conversationActive || !keepTalkingEnabled() || suppressAutoListen) {
     return;
   }
@@ -1091,8 +1207,17 @@ async function maybeContinueConversation(speakLang) {
   const listenLang = selectedListenLanguage();
   const promptLang = listenLang === "auto" ? FALLBACK_LANGUAGE : listenLang;
   await delay(350);
+  if (!isCurrentRun(token) || !conversationActive || suppressAutoListen) {
+    return;
+  }
   await speak(promptFor(CONTINUE_PROMPTS, promptLang), promptLang);
+  if (!isCurrentRun(token) || !conversationActive || suppressAutoListen) {
+    return;
+  }
   await delay(250);
+  if (!isCurrentRun(token) || !conversationActive || suppressAutoListen) {
+    return;
+  }
   await startTalking({ prompted: true, fromConversation: true });
 }
 
@@ -1187,6 +1312,12 @@ function createRecognition() {
 
   instance.onend = () => {
     clearListeningWatchdog();
+    if (recognitionOutcome === "aborted") {
+      if (state === "listening") {
+        setState("idle");
+      }
+      return;
+    }
     if (state === "listening") {
       setState("idle");
       if (!recognitionOutcome) {
@@ -1216,21 +1347,19 @@ async function startTalking(options = {}) {
     return;
   }
 
-  // If already listening, stop cleanly so a second click can restart.
-  if (state === "listening" && recognition) {
-    try {
-      recognition.stop();
-    } catch (_error) {
-      // ignore
-    }
-    clearListeningWatchdog();
-    recognitionOutcome = "aborted";
-    conversationActive = false;
-    setState("idle", "Stopped listening.");
-    await speak("Stopped listening.", FALLBACK_LANGUAGE);
+  // Conversation auto-listen must honor Stop.
+  if (fromConversation && (suppressAutoListen || !conversationActive)) {
     return;
   }
 
+  // If already listening, stop cleanly (silent — do not speak over Stop).
+  if (state === "listening" && recognition) {
+    stopEverything("Stopped listening.");
+    return;
+  }
+
+  // New Talk cancels any in-flight answer / continue chain.
+  const token = bumpRunToken();
   conversationActive = true;
   suppressAutoListen = false;
 
@@ -1245,14 +1374,23 @@ async function startTalking(options = {}) {
 
   if (!prompted && !fromConversation) {
     await speak(promptFor(LISTEN_PROMPTS, promptLang), promptLang);
+    if (!isCurrentRun(token) || suppressAutoListen) {
+      return;
+    }
     await delay(280);
   } else {
     await delay(180);
+  }
+  if (!isCurrentRun(token) || suppressAutoListen) {
+    return;
   }
 
   // Soft cue after the prompt finishes — never during recognition.
   await playUnlockChirp();
   await delay(220);
+  if (!isCurrentRun(token) || suppressAutoListen) {
+    return;
+  }
 
   // Fresh instance avoids Chrome "already started" dead ends.
   recognition = createRecognition();
@@ -1271,6 +1409,9 @@ async function startTalking(options = {}) {
     console.error("START ERROR:", error);
     // Retry once with a brand-new instance.
     try {
+      if (!isCurrentRun(token) || suppressAutoListen) {
+        return;
+      }
       recognition = createRecognition();
       recognition.start();
       return;
@@ -1320,21 +1461,7 @@ talkButton.addEventListener("click", () => {
 
 if (stopAudioBtn) {
   stopAudioBtn.addEventListener("click", () => {
-    suppressAutoListen = true;
-    conversationActive = false;
-    stopActiveAudio();
-    if (synth) {
-      synth.cancel();
-    }
-    if (state === "listening" && recognition) {
-      try {
-        recognition.stop();
-      } catch (_error) {
-        // ignore
-      }
-    }
-    setIntensity(0.08);
-    statusMessage.textContent = "Sound stopped.";
+    stopEverything("Stopped.");
   });
 }
 
