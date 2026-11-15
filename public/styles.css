@@ -221,6 +221,13 @@ h1 {
   line-height: 1.5;
 }
 
+.data-display .avail {
+  display: inline-block;
+  margin-top: 4px;
+  color: #9fb6c9;
+  font-size: 0.82rem;
+}
+
 .citation {
   color: rgba(231, 238, 245, 0.78);
   font-size: 0.8rem;

@@ -129,19 +129,99 @@ function yyyymmdd(date) {
   return `${y}${m}${d}`;
 }
 
-function recentPowerWindow() {
-  // POWER daily values lag a few days; end 3 days ago, start 9 days before that.
-  const end = new Date();
-  end.setUTCDate(end.getUTCDate() - 3);
-  const start = new Date(end);
-  start.setUTCDate(start.getUTCDate() - 6);
-  return { start: yyyymmdd(start), end: yyyymmdd(end) };
+function parseYmd(value) {
+  if (!value) {
+    return null;
+  }
+  const text = String(value).trim();
+  if (/^\d{8}$/.test(text)) {
+    return text;
+  }
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) {
+    return `${iso[1]}${iso[2]}${iso[3]}`;
+  }
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    return yyyymmdd(parsed);
+  }
+  return null;
 }
 
-async function fetchNasaPowerKathmandu() {
+function parseDateFromMessage(message) {
+  const lower = String(message || "").toLowerCase();
+  const today = new Date();
+
+  if (/\btoday\b|\bnow\b|\bcurrent\b|\blatest\b/.test(lower)) {
+    return { mode: "latest" };
+  }
+  if (/\byesterday\b/.test(lower)) {
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - 1);
+    return { mode: "date", date: yyyymmdd(d) };
+  }
+  if (/\blast\s+week\b/.test(lower)) {
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - 7);
+    return { mode: "date", date: yyyymmdd(d) };
+  }
+
+  const iso = lower.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
+  if (iso) {
+    return { mode: "date", date: `${iso[1]}${iso[2]}${iso[3]}` };
+  }
+  const compact = lower.match(/\b(20\d{2})(\d{2})(\d{2})\b/);
+  if (compact) {
+    return { mode: "date", date: `${compact[1]}${compact[2]}${compact[3]}` };
+  }
+
+  const months = {
+    january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+    july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+    jan: 1, feb: 2, mar: 3, apr: 4, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12
+  };
+  const named = lower.match(
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+(\d{1,2})(?:,\s*(20\d{2}))?\b/
+  );
+  if (named) {
+    const month = months[named[1]];
+    const day = Number(named[2]);
+    const year = Number(named[3] || today.getUTCFullYear());
+    const d = new Date(Date.UTC(year, month - 1, day));
+    if (!Number.isNaN(d.getTime())) {
+      return { mode: "date", date: yyyymmdd(d) };
+    }
+  }
+
+  return { mode: "latest" };
+}
+
+function powerWindowForRequest(requestedYmd) {
+  if (requestedYmd) {
+    // Pull a tiny window around the requested day in case of lag/fill values.
+    const y = Number(requestedYmd.slice(0, 4));
+    const m = Number(requestedYmd.slice(4, 6));
+    const d = Number(requestedYmd.slice(6, 8));
+    const center = new Date(Date.UTC(y, m - 1, d));
+    const start = new Date(center);
+    start.setUTCDate(start.getUTCDate() - 1);
+    const end = new Date(center);
+    end.setUTCDate(end.getUTCDate() + 1);
+    return { start: yyyymmdd(start), end: yyyymmdd(end), requestedYmd };
+  }
+
+  // Ask through "today" and keep the newest non-fill day POWER has published.
+  const end = new Date();
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - 14);
+  return { start: yyyymmdd(start), end: yyyymmdd(end), requestedYmd: null };
+}
+
+async function fetchNasaPowerKathmandu(options = {}) {
   const lat = "27.7172";
   const lon = "85.3240";
-  const { start, end } = recentPowerWindow();
+  const requestedYmd = parseYmd(options.date);
+  const { start, end } = powerWindowForRequest(requestedYmd);
   const nasaUrl =
     `https://power.larc.nasa.gov/api/temporal/daily/point` +
     `?parameters=PRECTOTCORR,T2M&community=RE&longitude=${lon}&latitude=${lat}` +
@@ -171,18 +251,53 @@ async function fetchNasaPowerKathmandu() {
     throw new Error("NASA POWER returned only fill values for this window.");
   }
 
-  const latestDate = usable[usable.length - 1];
+  let selectedDate = usable[usable.length - 1];
+  let selection = "latest-available";
+  if (requestedYmd) {
+    if (usable.includes(requestedYmd)) {
+      selectedDate = requestedYmd;
+      selection = "exact";
+    } else {
+      // Nearest available day to the request.
+      selectedDate = usable.reduce((best, date) =>
+        Math.abs(Number(date) - Number(requestedYmd)) <
+        Math.abs(Number(best) - Number(requestedYmd))
+          ? date
+          : best
+      );
+      selection = "nearest-available";
+    }
+  }
+
   const series = usable.map((date) => ({
     date,
     rainfallMm: precip[date],
     tempC: temp[date]
   }));
 
+  const lagDays = Math.max(
+    0,
+    Math.round((Date.now() - Date.UTC(
+      Number(selectedDate.slice(0, 4)),
+      Number(selectedDate.slice(4, 6)) - 1,
+      Number(selectedDate.slice(6, 8))
+    )) / 86400000)
+  );
+
   return {
     trackId: "atmospheric-river",
-    rainfall: precip[latestDate],
-    temperatureC: temp[latestDate],
-    date: latestDate,
+    rainfall: precip[selectedDate],
+    temperatureC: temp[selectedDate],
+    date: selectedDate,
+    requestedDate: requestedYmd,
+    selection,
+    lagDays,
+    availabilityNote:
+      selection === "exact"
+        ? `Observation for ${formatNasaDate(selectedDate)}`
+        : selection === "nearest-available"
+          ? `Requested ${formatNasaDate(requestedYmd)}; nearest POWER day is ${formatNasaDate(selectedDate)}`
+          : `Latest POWER day available now: ${formatNasaDate(selectedDate)} (usually lags ~${Math.max(lagDays, 2)} days)`,
     series,
     location: { lat, lon, name: "Kathmandu" },
     source: {
@@ -340,16 +455,16 @@ app.get("/api/eic-tracks", (_req, res) => {
   res.json({ tracks: EIC_TRACKS });
 });
 
-app.get("/api/nasa-weather", async (_req, res) => {
+app.get("/api/nasa-weather", async (req, res) => {
   try {
-    const payload = await fetchNasaPowerKathmandu();
+    const payload = await fetchNasaPowerKathmandu({ date: req.query.date });
     console.log(
-      `[NASA POWER] Kathmandu rain=${payload.rainfall} mm/day temp=${payload.temperatureC} C on ${payload.date}`
+      `[NASA POWER] Kathmandu rain=${payload.rainfall} mm/day temp=${payload.temperatureC} C on ${payload.date} selection=${payload.selection}`
     );
     res.json(payload);
   } catch (error) {
     console.error("NASA POWER Error:", error);
-    res.status(500).json({ error: "Failed to fetch NASA POWER climate data." });
+    res.status(500).json({ error: error.message || "Failed to fetch NASA POWER climate data." });
   }
 });
 
@@ -364,6 +479,15 @@ app.get("/api/gistemp", async (_req, res) => {
   }
 });
 
+
+function formatNasaDate(raw) {
+  const text = String(raw || "").trim();
+  if (/^\d{8}$/.test(text)) {
+    return `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
+  }
+  return text;
+}
+
 function fallbackReplyFromSonify(sonify) {
   if (!sonify) {
     return null;
@@ -371,18 +495,16 @@ function fallbackReplyFromSonify(sonify) {
 
   if (sonify.type === "power-rain") {
     return (
-      `NASA POWER reports Kathmandu rainfall at ${Number(sonify.rainfallMm).toFixed(1)} ` +
-      `millimeters per day on ${sonify.date}, with air temperature around ` +
-      `${Number(sonify.temperatureC).toFixed(0)} degrees Celsius. ` +
-      `This soundscape is paired with the NASA Earth Information Center atmospheric river visualization.`
+      `For Kathmandu on ${formatNasaDate(sonify.date)}, rainfall was ` +
+      `${Number(sonify.rainfallMm).toFixed(1)} millimeters per day, ` +
+      `and air temperature around ${Number(sonify.temperatureC).toFixed(0)} degrees Celsius.`
     );
   }
 
   if (sonify.type === "gistemp") {
     return (
-      `NASA GISTEMP version 4 shows a global annual temperature anomaly of ` +
-      `${Number(sonify.anomalyC).toFixed(2)} degrees Celsius for ${sonify.year}, ` +
-      `relative to the nineteen fifty one to nineteen eighty baseline.`
+      `Global temperature anomaly for ${sonify.year} was ` +
+      `${Number(sonify.anomalyC).toFixed(2)} degrees Celsius above the nineteen fifty one to nineteen eighty baseline.`
     );
   }
 
@@ -401,17 +523,24 @@ async function attachNasaContext(message) {
     lower.includes("weather") ||
     lower.includes("rain")
   ) {
-    const power = await fetchNasaPowerKathmandu();
+    const dateReq = parseDateFromMessage(message);
+    const power = await fetchNasaPowerKathmandu({
+      date: dateReq.mode === "date" ? dateReq.date : undefined
+    });
     nasaContext =
-      `NASA observation context: NASA POWER for Kathmandu on ${power.date} ` +
-      `reports precipitation ${power.rainfall} millimeters per day and temperature ` +
-      `${power.temperatureC} degrees Celsius. This is paired with the NASA SVS EIC ` +
-      `atmospheric river visualization (${power.eicPairing.eicUrl}).`;
+      `NASA observation context: POWER for Kathmandu on ${power.date} ` +
+      `(${power.availabilityNote}) reports precipitation ${power.rainfall} millimeters per day ` +
+      `and temperature ${power.temperatureC} degrees Celsius. ` +
+      `Paired with SVS EIC atmospheric river visualization (${power.eicPairing.eicUrl}). ` +
+      `If the user asked for a day POWER has not published yet, explain the lag briefly.`;
     sonify = {
       type: "power-rain",
       rainfallMm: power.rainfall,
       temperatureC: power.temperatureC,
       date: power.date,
+      requestedDate: power.requestedDate,
+      selection: power.selection,
+      availabilityNote: power.availabilityNote,
       trackId: power.trackId,
       frameUrl: power.eicPairing.frameUrl,
       citation: power.source.citation

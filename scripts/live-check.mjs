@@ -224,8 +224,12 @@ async function checkBrowser() {
     const dataText = await page.$eval("#dataDisplay", (el) => el.textContent);
     if (!/mm\/day/i.test(dataText)) {
       fail("browser-kathmandu-data", dataText);
+    } else if (/\b20\d{6}\b/.test(dataText)) {
+      fail("browser-date-format", `raw YYYYMMDD still shown: ${dataText}`);
+    } else if (!/20\d{2}/.test(dataText)) {
+      fail("browser-date-format", dataText);
     } else {
-      ok("browser-kathmandu-data", dataText.replace(/\s+/g, " ").slice(0, 120));
+      ok("browser-kathmandu-data", dataText.replace(/\s+/g, " ").slice(0, 140));
     }
 
     const statusText = await page.$eval("#statusMessage", (el) => el.textContent);

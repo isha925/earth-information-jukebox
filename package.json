@@ -4,7 +4,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node scripts/live-check.mjs",
+    "test": "npm run test:unit && npm run test:api && npm run test:browser && npm run live-check",
+    "test:unit": "node scripts/bench-unit.mjs",
+    "test:api": "node scripts/bench-api.mjs",
+    "test:browser": "node scripts/bench-browser.mjs",
     "live-check": "node scripts/live-check.mjs"
   },
   "type": "commonjs",
