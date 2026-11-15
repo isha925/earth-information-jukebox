@@ -26,80 +26,97 @@ You can also ask about **global temperature** — that uses NASA GISTEMP and pla
 
 ## What is in this folder
 
-| Item | What it is |
+| Item | What it is (plain words) |
 | --- | --- |
-| `server.js` | The backend. Talks to NASA and Gemini, serves the web page |
-| `public/` | The website you see in the browser (`index.html`, `app.js`, `styles.css`) |
-| `.env.example` | Template for your secret keys (copy this to `.env`) |
-| `.env` | Your real keys (do **not** commit this; it stays on your computer) |
-| `DATASETS.md` | Which NASA datasets we use and why they count for the challenge |
-| `package.json` | Node project settings and scripts (`npm start`, `npm test`) |
-| `scripts/` | Automated checks so the demo path keeps working |
+| `server.js` | The “receptionist” program: talks to NASA and Gemini, then serves the web page |
+| `public/` | What you see in the browser (page layout, buttons, sounds) |
+| `.env.example` | A blank template for secret passwords (API keys) |
+| `.env` | Your real secret passwords on your computer only — never share or upload this |
+| `DATASETS.md` | Which NASA datasets we use and why they fit the challenge |
+| `package.json` | Project settings and shortcuts like `npm start` |
+| `scripts/` | Automatic checks that the demo path still works |
 | `README.md` | This guide |
 
-You do **not** need to edit the code to run a demo. You mainly need Node.js, a Gemini key, and Chrome.
+You do **not** need to edit code to run a demo. You mainly need Node.js, a Gemini API key, and Chrome.
 
 ---
 
-## How it works (practice this for your demo video)
+## How it works (beginner-friendly)
 
-Speak slowly. One idea per sentence. The audience only needs three ideas: **NASA gives the truth**, **sound makes it feel real**, **Gemini is the voice**.
+You do not need a computer-science background to understand this project. Think of it like ordering food, then hearing the weather as music.
 
-### 1) What the person does
+### Tiny dictionary (everyday language)
 
-1. Open the app in Chrome.
-2. Press **Talk** (or say **“Hey Jukebox”** if wake word is on).
-3. Ask something simple, like “rain in Kathmandu” or “global temperature”.
-4. Watch the NASA Earth picture, hear the sound, and listen to the short spoken answer.
-
-### 2) How NASA data is used
-
-NASA is the source of the science. Gemini does **not** invent the numbers.
-
-| What you see / hear | Which NASA data | What it means |
-| --- | --- | --- |
-| Big Earth picture | NASA SVS / Earth Information Center (for example atmospheric river SVS 4960) | Real NASA science storytelling visual |
-| Rain / dry sound for a city | NASA **POWER** daily rainfall and temperature for that place’s latitude and longitude | Local weather numbers from NASA |
-| Rising tone for warming | NASA **GISTEMP** global temperature anomaly | How much warmer the planet is vs the baseline |
-
-Simple story you can say on camera:
-
-> “When I ask about rain in a city, the app finds that place, downloads NASA POWER rainfall and temperature for that spot, and turns those numbers into sound. Zero millimeters means a dry day — we play a calm cue, not fake rain. For global warming, we use NASA GISTEMP. The picture on screen is from NASA’s Earth Information Center, not a random photo.”
-
-### 3) How Gemini APIs are used for voice
-
-Gemini is the **conversation and voice layer**. It helps people talk to the NASA numbers.
-
-| Gemini piece | What it does in this app |
+| Word you will see | Everyday meaning |
 | --- | --- |
-| **Gemini Live** (Talk button) | Live two-way voice: you speak, it listens, you can interrupt. This is the main Talk path. |
-| **NASA tools inside Live** | When you ask about rain or global temperature, Live calls our server tools that fetch NASA POWER / GISTEMP, then speaks from those results. |
-| **Gemini TTS** (when needed) | If the computer has no good voice for a language like Nepali, the app can synthesize that language with Gemini text-to-speech. |
-| **Gemini chat** (typed Ask / fallback) | If Live is unavailable, typed questions still get a short spoken NASA summary through the chat path. |
+| **App** | The website running on your computer that you open in Chrome |
+| **Browser** | Chrome or Edge — the window where you click Talk and hear sound |
+| **Server** | A small program on your computer that sits in the middle, like a receptionist. The browser asks the receptionist; the receptionist asks NASA or Google, then brings the answer back |
+| **API** | A polite request system between computers. Like a restaurant menu + waiter: you don’t go into the kitchen; you ask for “today’s rainfall for Tokyo,” and the kitchen (NASA or Google) sends back only that dish |
+| **API key** | A secret password for that menu. It proves “this request is allowed.” Keep it private, like a house key — never publish it |
+| **NASA data** | Measurements and pictures from NASA (rain, temperature, Earth images). This is the scientific truth in the app |
+| **Gemini** | Google’s AI service. In this project it is mainly the **voice and conversation helper**, not the source of climate numbers |
+| **TTS** | Text-to-speech: turning written words into a spoken voice |
 
-Simple story you can say on camera:
+### The big idea in one paragraph
 
-> “NASA is the data. Gemini is the voice. Talk uses Gemini Live so you can have a real conversation and interrupt. When you ask about rain, Live asks our NASA tools for POWER or GISTEMP, then answers out loud. If your computer has no Nepali system voice, Gemini TTS can still speak Nepali.”
+NASA already measures rain, temperature, and Earth stories. This app **borrows those real measurements**, turns them into **sound you can feel**, and uses **Gemini so you can talk** instead of only reading charts. NASA = facts. Sound = feeling. Gemini = speaking and listening.
 
-### 4) One full demo path (say this while clicking)
+### What happens when someone asks “rain in Tokyo”
 
-1. “Here is the NASA Earth Information Center visual.”
-2. “I press Talk — that opens Gemini Live.”
-3. “I ask: rain in Tokyo.”
-4. “The app fetches NASA POWER for Tokyo.”
-5. “If rainfall is above zero, you hear rain; if it is zero, you hear a dry cue.”
-6. “Gemini speaks a short summary of those NASA numbers.”
-7. “For global temperature, same idea with NASA GISTEMP as a tone.”
+1. **You speak or type** the question in the browser (like telling a friend what you want).
+2. **The server receives it** (the receptionist hears the request).
+3. **The server asks NASA’s POWER API** for Tokyo’s rainfall and temperature (like phoning NASA’s weather kitchen for that city’s numbers).
+4. **The browser plays sound**: rain noise if rainfall is above zero; a calm “dry day” sound if rainfall is zero. Zero is never faked as rain.
+5. **Gemini helps answer out loud**, using those NASA numbers, so you hear a short spoken summary.
 
-### Honesty rules (say these if a judge asks)
+If someone asks about **global temperature**, the same pattern uses NASA **GISTEMP** and plays a tone that rises with the warming number.
 
-- Background image = NASA SVS / Earth Information Center (details in `DATASETS.md`)
-- Numbers = NASA POWER or GISTEMP — not made up by the AI
-- If rainfall is **0**, you hear a dry cue — not fake rain
-- NASA POWER often lags a few days; the UI says “latest available day”
-- If Google’s voice service is busy, the banner tells you to try again in a few minutes
+### How NASA data is used
+
+NASA is the source of truth. The AI does not invent the millimeters or the warming number.
+
+| What the audience notices | NASA source | Plain explanation |
+| --- | --- | --- |
+| Large Earth picture behind the controls | NASA SVS / Earth Information Center (example: atmospheric river, SVS 4960) | A real NASA science visual, not a random internet photo |
+| Rain or dry sound for a city | NASA **POWER** (daily rain + temperature for a map location) | “How wet/hot was this place on the latest day NASA published?” |
+| Rising tone for warming | NASA **GISTEMP** (global temperature anomaly) | “How much warmer is the planet compared with the long-term average?” |
+
+Useful honesty points:
+
+- NASA POWER can lag by a few days. The app shows the **latest available day**, not necessarily “this morning.”
+- **0 mm rainfall** means dry → calm cue, not rain audio.
+- More dataset detail lives in `DATASETS.md`.
+
+### How Gemini is used for voice
+
+Gemini is the talking layer on top of NASA facts — similar to a tour guide who reads the museum label out loud, instead of writing a new label.
+
+| Gemini piece | What it does here | Everyday analogy |
+| --- | --- | --- |
+| **Gemini Live** (main **Talk** button) | Two-way voice chat: you talk, it listens, you can interrupt | A phone call with a helpful guide |
+| **Tools during Live** | When you ask about rain or global temperature, Live asks our server to fetch NASA POWER / GISTEMP, then speaks from that result | The guide looks up the official record before answering |
+| **Gemini TTS** (when needed) | Speaks languages your computer may not have built-in voices for (for example Nepali) | Hiring a narrator when your phone has no that-language voice pack |
+| **Gemini chat** (typed **Ask** / backup path) | If Live is unavailable, typing still gets a short spoken NASA summary | Texting the guide instead of calling |
+
+One sentence to remember: **NASA provides the measurements; Gemini helps people hear and discuss them.**
+
+### Optional short demo walkthrough
+
+Anyone explaining the project (for example in a short video) can follow this path:
+
+1. Show the NASA Earth Information Center visual on screen.
+2. Press **Talk** (Gemini Live starts).
+3. Ask: “rain in Tokyo” (or Kathmandu, or another city).
+4. Point out NASA POWER numbers arriving, then the rain or dry sound.
+5. Let Gemini speak the short summary of those NASA numbers.
+6. Optionally ask “global temperature” and point to NASA GISTEMP as a tone.
+7. If a language needs it, mention Gemini TTS for spoken replies the device cannot voice locally.
+
+If Google’s voice service is busy, the on-screen banner asks the user to try again in a few minutes — same idea as a busy phone line.
 
 ---
+
 
 
 ## Before you start (checklist)
