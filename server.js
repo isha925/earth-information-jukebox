@@ -704,49 +704,59 @@ async function synthesizeGeminiSpeech(text) {
     `${encodeURIComponent(GEMINI_TTS_MODEL)}:generateContent` +
     `?key=${encodeURIComponent(GEMINI_API_KEY)}`;
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: trimmed }] }],
-      generationConfig: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: GEMINI_TTS_VOICE }
-          }
+  const body = JSON.stringify({
+    contents: [{ parts: [{ text: trimmed }] }],
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: { voiceName: GEMINI_TTS_VOICE }
         }
       }
-    })
+    }
   });
 
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const message =
-      payload?.error?.message || `Gemini TTS HTTP ${response.status}`;
-    throw new Error(message);
+  let lastError = "Gemini TTS failed.";
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      lastError =
+        payload?.error?.message || `Gemini TTS HTTP ${response.status}`;
+      if (response.status === 429 || response.status === 503) {
+        await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
+        continue;
+      }
+      throw new Error(lastError);
+    }
+
+    const parts = payload?.candidates?.[0]?.content?.parts || [];
+    const audioPart = parts.find((part) => part?.inlineData?.data);
+    if (!audioPart?.inlineData?.data) {
+      lastError = "Gemini TTS returned no audio.";
+      continue;
+    }
+
+    const mimeType = audioPart.inlineData.mimeType || "audio/L16";
+    const raw = Buffer.from(audioPart.inlineData.data, "base64");
+    const sampleRate = parseAudioMimeSampleRate(mimeType);
+    const wav = /wav/i.test(mimeType) ? raw : pcm16LeToWav(raw, sampleRate);
+
+    return {
+      mimeType: "audio/wav",
+      wav,
+      model: GEMINI_TTS_MODEL,
+      voice: GEMINI_TTS_VOICE,
+      sampleRate
+    };
   }
 
-  const parts = payload?.candidates?.[0]?.content?.parts || [];
-  const audioPart = parts.find((part) => part?.inlineData?.data);
-  if (!audioPart?.inlineData?.data) {
-    throw new Error("Gemini TTS returned no audio.");
-  }
-
-  const mimeType = audioPart.inlineData.mimeType || "audio/L16";
-  const raw = Buffer.from(audioPart.inlineData.data, "base64");
-  const sampleRate = parseAudioMimeSampleRate(mimeType);
-  const wav = /wav/i.test(mimeType)
-    ? raw
-    : pcm16LeToWav(raw, sampleRate);
-
-  return {
-    mimeType: "audio/wav",
-    wav,
-    model: GEMINI_TTS_MODEL,
-    voice: GEMINI_TTS_VOICE,
-    sampleRate
-  };
+  throw new Error(lastError);
 }
 
 app.post("/api/tts", async (req, res) => {
