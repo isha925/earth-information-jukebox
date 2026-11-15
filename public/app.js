@@ -4,11 +4,14 @@ const askInput = document.getElementById("askInput");
 const askButton = document.getElementById("askButton");
 const kathmanduBtn = document.getElementById("kathmanduBtn");
 const gistempBtn = document.getElementById("gistempBtn");
+const stopAudioBtn = document.getElementById("stopAudioBtn");
 const statusMessage = document.getElementById("statusMessage");
 const paMessage = document.getElementById("paMessage");
 const dataDisplay = document.getElementById("dataDisplay");
 const earthScene = document.getElementById("earthScene");
 const citationLine = document.getElementById("citationLine");
+const trackLabel = document.getElementById("trackLabel");
+const intensityBar = document.getElementById("intensityBar");
 
 const LANGUAGE = "en-US";
 const REQUEST_TIMEOUT_MS = 20000;
@@ -96,7 +99,16 @@ function setBusy() {
     );
     talkButton.disabled = thinking || !speechAvailable;
     talkButton.textContent = listening ? "Listening… (click to stop)" : "Talk";
+    talkButton.classList.toggle("is-listening", listening);
   }
+}
+
+function setIntensity(fraction) {
+  if (!intensityBar) {
+    return;
+  }
+  const clamped = Math.max(0.08, Math.min(Number(fraction) || 0, 1));
+  intensityBar.style.width = `${Math.round(clamped * 100)}%`;
 }
 
 function setState(nextState, status) {
@@ -196,12 +208,15 @@ function speak(text) {
   }
 }
 
-function setEicFrame(frameUrl, citation) {
+function setEicFrame(frameUrl, citation, label) {
   if (earthScene && frameUrl) {
     earthScene.style.backgroundImage = `url("${frameUrl}")`;
   }
   if (citationLine && citation) {
     citationLine.textContent = citation;
+  }
+  if (trackLabel && label) {
+    trackLabel.textContent = label;
   }
 }
 
@@ -272,9 +287,14 @@ async function applySonify(sonify) {
   }
 
   if (sonify.frameUrl) {
+    const label =
+      sonify.type === "gistemp"
+        ? "EIC visual: Global temperature · paired with GISTEMP"
+        : "EIC visual: Atmospheric river · SVS 4960 · POWER rain";
     setEicFrame(
       sonify.frameUrl,
-      `${sonify.citation || "NASA"} · track ${sonify.trackId}`
+      `${sonify.citation || "NASA"} · track ${sonify.trackId}`,
+      label
     );
   }
 
@@ -288,6 +308,7 @@ async function applySonify(sonify) {
       `Precipitation: <strong>${Number(sonify.rainfallMm).toFixed(2)} mm/day</strong><br>` +
       `Temperature: <strong>${Number(sonify.temperatureC).toFixed(1)} °C</strong><br>` +
       `Date: <strong>${niceDate}</strong>${note}`;
+    setIntensity(Math.min((Number(sonify.rainfallMm) || 0) / 20, 1));
     await playRainSoundscape(Number(sonify.rainfallMm) || 0);
   }
 
@@ -296,6 +317,7 @@ async function applySonify(sonify) {
       `<strong>NASA GISTEMP v4</strong><br>` +
       `Year: <strong>${sonify.year}</strong><br>` +
       `Global anomaly: <strong>${Number(sonify.anomalyC).toFixed(2)} °C</strong>`;
+    setIntensity(Math.min(Math.max((Number(sonify.anomalyC) || 0) / 1.5, 0.15), 1));
     await playTemperatureTone(Number(sonify.anomalyC) || 0);
   }
 }
@@ -308,10 +330,12 @@ async function loadDefaultTrack() {
     if (track) {
       setEicFrame(
         track.frameUrl,
-        `${track.eicSource} · ${track.numericSource}`
+        `${track.eicSource} · ${track.numericSource}`,
+        `EIC visual: ${track.title || track.id} · SVS science frame`
       );
       dataDisplay.textContent =
-        "Click “Hear Kathmandu rain”, or Talk and say “Kathmandu rainfall”.";
+        "Click “Hear Kathmandu monsoon rain”, or Talk and say “Kathmandu rainfall”.";
+      setIntensity(0.12);
     }
   } catch (error) {
     console.error("EIC track load failed:", error);
@@ -676,5 +700,16 @@ talkButton.addEventListener("click", () => {
     }
   });
 });
+
+if (stopAudioBtn) {
+  stopAudioBtn.addEventListener("click", () => {
+    stopActiveAudio();
+    if (synth) {
+      synth.cancel();
+    }
+    setIntensity(0.08);
+    statusMessage.textContent = "Sound stopped.";
+  });
+}
 
 loadDefaultTrack();

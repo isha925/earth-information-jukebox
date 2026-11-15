@@ -2,6 +2,10 @@
 
 This project targets **NASA Space Apps 2026 — The Earth Information Jukebox**.
 
+**Human problem we attach to the brief:** monsoon / flood awareness for **Kathmandu** —
+people who need a fast, accessible gut-check on rainfall and planetary warming, not another
+dense chart.
+
 Challenge intent: pair **NASA Earth Information Center (EIC) visual frames** with
 **real-time sonification** driven by NASA Earth science data.
 

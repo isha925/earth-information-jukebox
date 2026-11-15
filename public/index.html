@@ -3,26 +3,40 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Earth Information Jukebox</title>
+  <title>Earth Information Jukebox — Hear Kathmandu’s monsoon through NASA data</title>
+  <meta name="description" content="NASA Space Apps 2026: pair Earth Information Center visuals with POWER and GISTEMP sonification and voice.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <main class="earth-interface">
-    <div id="earthScene" class="earth-scene" role="img" aria-label="NASA Earth Information Center visualization"></div>
+    <div id="earthScene" class="earth-scene" role="img" aria-label="NASA Earth Information Center atmospheric river visualization"></div>
     <div class="scene-darkening" aria-hidden="true"></div>
+    <div class="scene-sheen" aria-hidden="true"></div>
 
     <section class="interface-content">
       <header class="top-bar">
-        <p class="brand">Earth Information Jukebox</p>
+        <div class="brand-block">
+          <p class="brand">Earth Information Jukebox</p>
+          <p class="brand-sub">NASA Space Apps 2026 · Kathmandu monsoon awareness</p>
+        </div>
         <p class="source-pill">NASA SVS EIC · POWER · GISTEMP</p>
       </header>
 
+      <div class="hero-copy">
+        <p class="eyebrow">Hear the water risk</p>
+        <h1>Listen to Earth.</h1>
+        <p class="problem">
+          Charts alone are easy to miss in a flood season. This jukebox turns NASA Earth science into sound
+          so anyone in Kathmandu — or far from a dashboard — can feel rainfall and climate change together.
+        </p>
+      </div>
+
       <div class="stage">
-        <p class="eyebrow">NASA Space Apps 2026</p>
-        <h1>Hear Earth change.</h1>
+        <p id="trackLabel" class="track-label">EIC visual: Atmospheric river · SVS 4960</p>
+
         <p id="paMessage" class="lead">
-          Pair NASA Earth Information Center visuals with live NASA data sonification.
-          Ask about Kathmandu rainfall or global temperature.
+          Ask about Kathmandu rainfall to hear NASA POWER precipitation as rain.
+          Ask about global temperature to hear GISTEMP as a rising tone.
         </p>
 
         <form id="askForm" class="ask-form">
@@ -32,7 +46,7 @@
             name="ask"
             type="text"
             autocomplete="off"
-            placeholder="Ask: Kathmandu rain yesterday / 2026-11-10"
+            placeholder="Try: Kathmandu rain yesterday · 2026-11-10 · global temperature"
             required
           >
           <button id="askButton" type="submit">Ask</button>
@@ -41,11 +55,21 @@
 
         <div class="quick-actions">
           <button id="kathmanduBtn" type="button" data-question="Kathmandu rainfall">
-            Hear Kathmandu rain
+            Hear Kathmandu monsoon rain
           </button>
           <button id="gistempBtn" type="button" data-question="global temperature">
-            Hear global temperature
+            Hear global warming tone
           </button>
+          <button id="stopAudioBtn" type="button" class="ghost">
+            Stop sound
+          </button>
+        </div>
+
+        <div class="meter" aria-hidden="true">
+          <div class="meter-label">Sonification intensity</div>
+          <div class="meter-track">
+            <div id="intensityBar" class="meter-fill"></div>
+          </div>
         </div>
 
         <p id="statusMessage" class="status" aria-live="polite"></p>
