@@ -3,11 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Earth Information Jukebox — Hear any place through NASA data</title>
-  <meta name="description" content="NASA Space Apps 2026: ask any city — NASA POWER + EIC visuals sonify rainfall on the fly; GISTEMP for global warming.">
+  <title>Earth Information Jukebox — Talk with NASA Earth data</title>
+  <meta name="description" content="Voice-first NASA Space Apps jukebox: ask by talking, hear rainfall and climate as sound.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <a class="skip-link" href="#conversationStage">Skip to conversation</a>
+
   <main class="earth-interface">
     <div id="earthScene" class="earth-scene" role="img" aria-label="NASA Earth Information Center atmospheric river visualization"></div>
     <div class="scene-darkening" aria-hidden="true"></div>
@@ -17,33 +19,33 @@
       <header class="top-bar">
         <div class="brand-block">
           <p class="brand">Earth Information Jukebox</p>
-          <p class="brand-sub">NASA Space Apps 2026 · Ask any place · Hear Earth science</p>
+          <p class="brand-sub">NASA Space Apps 2026 · Voice-first Earth listening</p>
         </div>
         <p class="source-pill">NASA SVS EIC · POWER · GISTEMP</p>
       </header>
 
       <div class="hero-copy">
-        <p class="eyebrow">On-the-fly Earth listening</p>
-        <h1>Listen to Earth.</h1>
+        <p class="eyebrow">Conversation mode</p>
+        <h1>Talk with Earth.</h1>
         <p class="problem">
-          Name a city — Tokyo, Miami, Pokhara, Kathmandu — and the jukebox geocodes it, pulls NASA POWER
-          for that point, and turns real precipitation into sound on an EIC science frame.
-          Zero millimeters means a dry cue, not fake rain.
+          You do not need to read the screen. Press <strong>Talk</strong> for a live duplex
+          conversation (Gemini Live), ask for rain in any city or global temperature, and hear
+          NASA data as sound. You can interrupt anytime.
         </p>
       </div>
 
-      <div class="stage">
+      <div id="conversationStage" class="stage" tabindex="-1">
         <p id="trackLabel" class="track-label">EIC visual: Atmospheric river · SVS 4960</p>
 
-        <p id="paMessage" class="lead">
-          Ask rainfall for any place to hear NASA POWER precipitation.
-          Ask global temperature to hear GISTEMP as a rising tone.
+        <p id="paMessage" class="lead" aria-live="assertive" aria-atomic="true">
+          Press Talk and say something like “rain in Kathmandu” or “global temperature”.
+          I will answer out loud.
         </p>
 
         <div class="lang-row">
-          <label for="replyLanguage">Speak reply in</label>
+          <label for="replyLanguage">Answer language</label>
           <select id="replyLanguage" name="replyLanguage">
-            <option value="auto" selected>Auto (regional by place, else English)</option>
+            <option value="auto" selected>Auto (by place, else English)</option>
             <option value="en-US">English</option>
             <option value="ne-NP">Nepali</option>
             <option value="hi-IN">Hindi</option>
@@ -58,21 +60,46 @@
           <span id="voiceSupportNote" class="voice-note" aria-live="polite"></span>
         </div>
 
+        <div class="conversation-controls">
+          <button
+            id="talkButton"
+            type="button"
+            class="talk-primary"
+            aria-label="Start or stop live duplex Talk with the jukebox. Shortcut: Alt plus T"
+          >
+            Talk
+          </button>
+          <button
+            id="stopAudioBtn"
+            type="button"
+            class="ghost"
+            aria-label="Stop sound, speech, and listening. Shortcut: Alt plus S"
+          >
+            Stop
+          </button>
+          <label class="keep-talking">
+            <input id="keepTalking" type="checkbox" checked>
+            Keep listening after each answer (Chrome fallback only)
+          </label>
+          <label class="keep-talking wake-word">
+            <input id="wakeWordEnabled" type="checkbox">
+            Listen for “Hey Jukebox” (opt-in wake word)
+          </label>
+        </div>
+
         <form id="askForm" class="ask-form">
-          <label class="sr-only" for="askInput">Ask the jukebox</label>
+          <label class="sr-only" for="askInput">Or type a question</label>
           <input
             id="askInput"
             name="ask"
             type="text"
             autocomplete="off"
-            placeholder="Try: rain in Tokyo · Pokhara yesterday · Miami · global temperature"
-            required
+            placeholder="Or type: rain in Tokyo · Kathmandu · global temperature"
           >
           <button id="askButton" type="submit">Ask</button>
-          <button id="talkButton" type="button">Talk</button>
         </form>
 
-        <div class="quick-actions">
+        <div class="quick-actions" aria-label="Quick spoken demos">
           <button id="kathmanduBtn" type="button" data-question="Kathmandu rainfall">
             Hear Kathmandu rain
           </button>
@@ -81,9 +108,6 @@
           </button>
           <button id="gistempBtn" type="button" data-question="global temperature">
             Hear global warming tone
-          </button>
-          <button id="stopAudioBtn" type="button" class="ghost">
-            Stop sound
           </button>
         </div>
 
@@ -95,12 +119,28 @@
         </div>
 
         <p id="statusMessage" class="status" aria-live="polite"></p>
+        <div
+          id="liveProcessCue"
+          class="live-process-cue"
+          hidden
+          role="status"
+          aria-live="polite"
+        >
+          <span class="live-process-spinner" aria-hidden="true"></span>
+          <span id="liveProcessCueText" class="live-process-text">Working…</span>
+        </div>
         <div id="dataDisplay" class="data-display" aria-live="polite"></div>
         <p id="citationLine" class="citation"></p>
+        <p class="a11y-hint">
+          Shortcuts: <kbd>Alt</kbd>+<kbd>T</kbd> talk · <kbd>Alt</kbd>+<kbd>S</kbd> stop ·
+          wake phrases: “Hey Jukebox” / “Okay Earth” (enable checkbox)
+        </p>
       </div>
     </section>
   </main>
 
   <script src="app.js"></script>
+  <script src="live-duplex.js"></script>
+  <script src="wake-word.js"></script>
 </body>
 </html>

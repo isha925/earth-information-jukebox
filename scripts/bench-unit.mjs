@@ -70,10 +70,73 @@ if (!/function createRecognition/.test(appJs) || !/function startTalking/.test(a
   ok("talk-helpers", "createRecognition + startTalking");
 }
 
-if (!/Stopped listening|Starting microphone|Listening…/.test(appJs)) {
+if (!/Stopped listening|Starting microphone|Listening…|I'm listening/.test(appJs)) {
   fail("talk-ux-copy", "Talk status copy incomplete");
 } else {
   ok("talk-ux-copy");
+}
+
+if (!/keepTalking|maybeContinueConversation|Alt/.test(appJs)) {
+  fail("conversation-mode", "voice-first conversation helpers missing");
+} else {
+  ok("conversation-mode", "keep listening + shortcuts");
+}
+
+if (
+  !/function stopEverything/.test(appJs) ||
+  !/function bumpRunToken/.test(appJs) ||
+  !/recognitionOutcome === "aborted"/.test(appJs) ||
+  !/utterance\.onerror = \(\) => finish\(\)/.test(appJs)
+) {
+  fail("stop-hard-abort", "Stop must abort speech, mic, and continue-listen");
+} else {
+  ok("stop-hard-abort", "runToken + stopEverything + no speak-after-cancel");
+}
+
+const liveProxy = fs.readFileSync(path.join(ROOT, "live-proxy.js"), "utf8");
+const liveClient = fs.readFileSync(path.join(ROOT, "public", "live-duplex.js"), "utf8");
+const wakeJs = fs.readFileSync(path.join(ROOT, "public", "wake-word.js"), "utf8");
+if (
+  !/attachLiveProxy/.test(liveProxy) ||
+  !/gemini-2.5-flash-native-audio-latest/.test(liveProxy) ||
+  !/jukeboxStartLiveTalk/.test(liveClient) ||
+  !/jukeboxStartLiveTalk/.test(appJs)
+) {
+  fail("talk-live-duplex", "Talk must prefer Gemini Live over Chrome speech");
+} else {
+  ok("talk-live-duplex", "Live proxy + Talk prefers jukeboxStartLiveTalk");
+}
+
+if (
+  !/hey\\s\+jukebox/i.test(wakeJs) ||
+  !/wakeWordEnabled/.test(wakeJs) ||
+  !/jukeboxOnLiveEnded/.test(wakeJs) ||
+  !/jukeboxStartTalk/.test(appJs)
+) {
+  fail("wake-word", "Hey Jukebox wake phrase wiring missing");
+} else {
+  ok("wake-word", "opt-in Hey Jukebox / Okay Earth");
+}
+
+if (
+  !/liveProcessCue/.test(liveClient) ||
+  !/setProcessCue/.test(liveClient) ||
+  !/BUSY_MESSAGE/.test(liveClient) ||
+  !/friendlyGoogleBusyMessage/.test(liveProxy)
+) {
+  fail("live-process-cue", "processing banner / busy Google errors missing");
+} else {
+  ok("live-process-cue", "visual process cue + Google busy copy");
+}
+
+if (
+  !/function recognitionLanguageFor/.test(appJs) ||
+  !/LISTEN_PROMPTS/.test(appJs) ||
+  !/instance\.lang = sttLang/.test(appJs)
+) {
+  fail("talk-language-aware", "Talk STT language wiring missing");
+} else {
+  ok("talk-language-aware", "STT follows answer language");
 }
 
 if (!/function isDryPrecipitation/.test(appJs) || !/function playDryDayCue/.test(appJs)) {

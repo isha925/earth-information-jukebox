@@ -6,8 +6,10 @@ if (process.env.GOOGLE_API_KEY && process.env.GEMINI_API_KEY) {
 }
 
 const path = require("path");
+const http = require("http");
 const express = require("express");
 const { GoogleGenAI } = require("@google/genai");
+const { attachLiveProxy, LIVE_MODEL } = require("./live-proxy");
 
 const PORT = Number(process.env.PORT) || 3000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -592,6 +594,8 @@ app.get("/api/health", (_req, res) => {
     geminiConfigured: Boolean(ai),
     nasaApiKeyConfigured: Boolean(NASA_API_KEY),
     model: GEMINI_MODEL,
+    liveModel: LIVE_MODEL,
+    liveDuplex: Boolean(GEMINI_API_KEY),
     tracks: EIC_TRACKS.map((track) => track.id)
   });
 });
@@ -704,49 +708,59 @@ async function synthesizeGeminiSpeech(text) {
     `${encodeURIComponent(GEMINI_TTS_MODEL)}:generateContent` +
     `?key=${encodeURIComponent(GEMINI_API_KEY)}`;
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: trimmed }] }],
-      generationConfig: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: GEMINI_TTS_VOICE }
-          }
+  const body = JSON.stringify({
+    contents: [{ parts: [{ text: trimmed }] }],
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: { voiceName: GEMINI_TTS_VOICE }
         }
       }
-    })
+    }
   });
 
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const message =
-      payload?.error?.message || `Gemini TTS HTTP ${response.status}`;
-    throw new Error(message);
+  let lastError = "Gemini TTS failed.";
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      lastError =
+        payload?.error?.message || `Gemini TTS HTTP ${response.status}`;
+      if (response.status === 429 || response.status === 503) {
+        await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
+        continue;
+      }
+      throw new Error(lastError);
+    }
+
+    const parts = payload?.candidates?.[0]?.content?.parts || [];
+    const audioPart = parts.find((part) => part?.inlineData?.data);
+    if (!audioPart?.inlineData?.data) {
+      lastError = "Gemini TTS returned no audio.";
+      continue;
+    }
+
+    const mimeType = audioPart.inlineData.mimeType || "audio/L16";
+    const raw = Buffer.from(audioPart.inlineData.data, "base64");
+    const sampleRate = parseAudioMimeSampleRate(mimeType);
+    const wav = /wav/i.test(mimeType) ? raw : pcm16LeToWav(raw, sampleRate);
+
+    return {
+      mimeType: "audio/wav",
+      wav,
+      model: GEMINI_TTS_MODEL,
+      voice: GEMINI_TTS_VOICE,
+      sampleRate
+    };
   }
 
-  const parts = payload?.candidates?.[0]?.content?.parts || [];
-  const audioPart = parts.find((part) => part?.inlineData?.data);
-  if (!audioPart?.inlineData?.data) {
-    throw new Error("Gemini TTS returned no audio.");
-  }
-
-  const mimeType = audioPart.inlineData.mimeType || "audio/L16";
-  const raw = Buffer.from(audioPart.inlineData.data, "base64");
-  const sampleRate = parseAudioMimeSampleRate(mimeType);
-  const wav = /wav/i.test(mimeType)
-    ? raw
-    : pcm16LeToWav(raw, sampleRate);
-
-  return {
-    mimeType: "audio/wav",
-    wav,
-    model: GEMINI_TTS_MODEL,
-    voice: GEMINI_TTS_VOICE,
-    sampleRate
-  };
+  throw new Error(lastError);
 }
 
 app.post("/api/tts", async (req, res) => {
@@ -1095,7 +1109,8 @@ app.post("/api/chat", async (req, res) => {
 
     if (error.status === 429 || error.status === 503) {
       return res.status(error.status).json({
-        error: "I'm getting a lot of questions right now. Please try again in a moment."
+        error:
+          "Google's servers look busy or not responding. Try again in a few minutes."
       });
     }
 
@@ -1119,13 +1134,21 @@ app.use((error, req, res, next) => {
   });
 });
 
-app.listen(PORT, (error) => {
+const server = http.createServer(app);
+
+attachLiveProxy(server, {
+  apiKey: GEMINI_API_KEY,
+  fetchNasaPower,
+  fetchGistempAnnual
+});
+
+server.listen(PORT, (error) => {
   if (error) {
     console.error(`Could not start the server on port ${PORT}:`, error.message);
     process.exit(1);
   }
 
   console.log(
-    `Earth Information Jukebox running at http://localhost:${PORT} (model: ${GEMINI_MODEL})`
+    `Earth Information Jukebox running at http://localhost:${PORT} (model: ${GEMINI_MODEL}; live: ${LIVE_MODEL})`
   );
 });
