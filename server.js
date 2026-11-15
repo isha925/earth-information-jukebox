@@ -8,6 +8,7 @@ const { GoogleGenAI } = require("@google/genai");
 const PORT = Number(process.env.PORT) || 3000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+const NASA_API_KEY = process.env.NASA_API_KEY || "";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_HISTORY_MESSAGES = 20;
@@ -195,17 +196,35 @@ async function fetchNasaPowerKathmandu() {
 }
 
 async function fetchGistempAnnual() {
-  const url = "https://data.giss.nasa.gov/gistemp/tabledata_v4/GLB.Ts+dSST.csv";
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "EarthInformationJukebox/1.0 (NASA Space Apps)",
-      Accept: "text/csv,text/plain,*/*"
-    }
-  });
-  if (!response.ok) {
-    throw new Error(`GISTEMP HTTP ${response.status}`);
+  if (gistempCache.payload && Date.now() - gistempCache.at < GISTEMP_CACHE_MS) {
+    return gistempCache.payload;
   }
 
+  const url = "https://data.giss.nasa.gov/gistemp/tabledata_v4/GLB.Ts+dSST.csv";
+  let response;
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      response = await fetch(url, {
+        headers: {
+          "User-Agent": "EarthInformationJukebox/1.0 (NASA Space Apps)",
+          Accept: "text/csv,text/plain,*/*"
+        }
+      });
+      if (response.ok) {
+        break;
+      }
+      lastError = new Error(`GISTEMP HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (!response || !response.ok) {
+    if (gistempCache.payload) {
+      return gistempCache.payload;
+    }
+    throw lastError || new Error("GISTEMP fetch failed");
+  }
   const text = await response.text();
   const lines = text.trim().split(/\r?\n/);
   // Skip title rows until the Year header.
@@ -240,7 +259,7 @@ async function fetchGistempAnnual() {
   }
 
   const latest = rows[rows.length - 1];
-  return {
+  const payload = {
     trackId: "global-temperature",
     latestYear: latest.year,
     anomalyC: latest.anomalyC,
@@ -252,15 +271,69 @@ async function fetchGistempAnnual() {
     },
     eicPairing: EIC_TRACKS[1]
   };
+  gistempCache = { at: Date.now(), payload };
+  return payload;
 }
+
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error(`${label} timed out after ${ms}ms`);
+        error.status = 503;
+        reject(error);
+      }, ms);
+    })
+  ]);
+}
+
+let gistempCache = { at: 0, payload: null };
+const GISTEMP_CACHE_MS = 15 * 60 * 1000;
 
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     geminiConfigured: Boolean(ai),
+    nasaApiKeyConfigured: Boolean(NASA_API_KEY),
     model: GEMINI_MODEL,
     tracks: EIC_TRACKS.map((track) => track.id)
   });
+});
+
+// Validates api.nasa.gov key. APOD is currently flaky; NEO is a stable probe.
+app.get("/api/nasa-key-check", async (_req, res) => {
+  if (!NASA_API_KEY) {
+    return res.status(503).json({
+      ok: false,
+      error: "NASA_API_KEY is not set in .env"
+    });
+  }
+
+  try {
+    const url =
+      "https://api.nasa.gov/neo/rest/v1/feed?start_date=2026-11-01&end_date=2026-11-01&api_key=" +
+      encodeURIComponent(NASA_API_KEY);
+    const response = await fetch(url);
+    const data = await response.json();
+    if (!response.ok) {
+      return res.status(502).json({
+        ok: false,
+        error: data.error_message || data.msg || `NASA API HTTP ${response.status}`
+      });
+    }
+    res.json({
+      ok: true,
+      service: "api.nasa.gov/neo",
+      elementCount: data.element_count,
+      note: "Key works. Challenge sonification still uses NASA POWER + GISTEMP + SVS EIC frames (no api.nasa.gov key required)."
+    });
+  } catch (error) {
+    console.error("NASA key check failed:", error);
+    res.status(502).json({ ok: false, error: "Failed to reach api.nasa.gov" });
+  }
 });
 
 app.get("/api/eic-tracks", (_req, res) => {
@@ -291,6 +364,82 @@ app.get("/api/gistemp", async (_req, res) => {
   }
 });
 
+function fallbackReplyFromSonify(sonify) {
+  if (!sonify) {
+    return null;
+  }
+
+  if (sonify.type === "power-rain") {
+    return (
+      `NASA POWER reports Kathmandu rainfall at ${Number(sonify.rainfallMm).toFixed(1)} ` +
+      `millimeters per day on ${sonify.date}, with air temperature around ` +
+      `${Number(sonify.temperatureC).toFixed(0)} degrees Celsius. ` +
+      `This soundscape is paired with the NASA Earth Information Center atmospheric river visualization.`
+    );
+  }
+
+  if (sonify.type === "gistemp") {
+    return (
+      `NASA GISTEMP version 4 shows a global annual temperature anomaly of ` +
+      `${Number(sonify.anomalyC).toFixed(2)} degrees Celsius for ${sonify.year}, ` +
+      `relative to the nineteen fifty one to nineteen eighty baseline.`
+    );
+  }
+
+  return null;
+}
+
+async function attachNasaContext(message) {
+  const lower = message.toLowerCase();
+  let nasaContext = "";
+  let sonify = null;
+
+  if (
+    lower.includes("kathmandu") ||
+    lower.includes("rainfall") ||
+    lower.includes("precipitation") ||
+    lower.includes("weather") ||
+    lower.includes("rain")
+  ) {
+    const power = await fetchNasaPowerKathmandu();
+    nasaContext =
+      `NASA observation context: NASA POWER for Kathmandu on ${power.date} ` +
+      `reports precipitation ${power.rainfall} millimeters per day and temperature ` +
+      `${power.temperatureC} degrees Celsius. This is paired with the NASA SVS EIC ` +
+      `atmospheric river visualization (${power.eicPairing.eicUrl}).`;
+    sonify = {
+      type: "power-rain",
+      rainfallMm: power.rainfall,
+      temperatureC: power.temperatureC,
+      date: power.date,
+      trackId: power.trackId,
+      frameUrl: power.eicPairing.frameUrl,
+      citation: power.source.citation
+    };
+  } else if (
+    lower.includes("global temperature") ||
+    lower.includes("gistemp") ||
+    lower.includes("warming") ||
+    lower.includes("climate")
+  ) {
+    const gistemp = await fetchGistempAnnual();
+    nasaContext =
+      `NASA observation context: NASA GISS GISTEMP version 4 global annual anomaly for ` +
+      `${gistemp.latestYear} is ${gistemp.anomalyC} degrees Celsius relative to the ` +
+      `1951 to 1980 baseline. Pair this with the EIC climate theme on earth.gov.`;
+    sonify = {
+      type: "gistemp",
+      anomalyC: gistemp.anomalyC,
+      year: gistemp.latestYear,
+      trackId: gistemp.trackId,
+      frameUrl: gistemp.eicPairing.frameUrl,
+      citation: gistemp.source.citation
+    };
+  }
+
+  return { nasaContext, sonify };
+}
+
 app.post("/api/chat", async (req, res) => {
   const { message, history } = req.body ?? {};
 
@@ -302,63 +451,26 @@ app.post("/api/chat", async (req, res) => {
     return res.status(400).json({ error: "That message is too long." });
   }
 
-  if (!ai) {
-    return res.status(503).json({
-      error: "The PA isn't set up yet. Add a Gemini API key to the server's .env file."
-    });
-  }
-
-  const lower = message.toLowerCase();
   let nasaContext = "";
   let sonify = null;
 
   try {
-    if (
-      lower.includes("kathmandu") ||
-      lower.includes("rainfall") ||
-      lower.includes("precipitation") ||
-      lower.includes("weather") ||
-      lower.includes("rain")
-    ) {
-      const power = await fetchNasaPowerKathmandu();
-      nasaContext =
-        `NASA observation context: NASA POWER for Kathmandu on ${power.date} ` +
-        `reports precipitation ${power.rainfall} millimeters per day and temperature ` +
-        `${power.temperatureC} degrees Celsius. This is paired with the NASA SVS EIC ` +
-        `atmospheric river visualization (${power.eicPairing.eicUrl}).`;
-      sonify = {
-        type: "power-rain",
-        rainfallMm: power.rainfall,
-        temperatureC: power.temperatureC,
-        date: power.date,
-        trackId: power.trackId,
-        frameUrl: power.eicPairing.frameUrl,
-        citation: power.source.citation
-      };
-    } else if (
-      lower.includes("global temperature") ||
-      lower.includes("gistemp") ||
-      lower.includes("warming") ||
-      lower.includes("climate")
-    ) {
-      const gistemp = await fetchGistempAnnual();
-      nasaContext =
-        `NASA observation context: NASA GISTEMP version 4 global annual anomaly for ` +
-        `${gistemp.latestYear} is ${gistemp.anomalyC} degrees Celsius relative to the ` +
-        `1951 to 1980 baseline. Pair this with the EIC climate theme on earth.gov.`;
-      sonify = {
-        type: "gistemp",
-        anomalyC: gistemp.anomalyC,
-        year: gistemp.latestYear,
-        trackId: gistemp.trackId,
-        frameUrl: gistemp.eicPairing.frameUrl,
-        citation: gistemp.source.citation
-      };
-    }
+    ({ nasaContext, sonify } = await attachNasaContext(message.trim()));
   } catch (error) {
     console.error("NASA context attach failed:", error.message);
     nasaContext =
       "NASA observation context unavailable right now. Answer generally and invite a retry.";
+  }
+
+  if (!ai) {
+    const fallback = fallbackReplyFromSonify(sonify);
+    if (fallback) {
+      return res.json({ reply: fallback, sonify, fallback: true });
+    }
+
+    return res.status(503).json({
+      error: "The PA isn't set up yet. Add a Gemini API key to the server's .env file."
+    });
   }
 
   const prompt = nasaContext
@@ -366,20 +478,29 @@ app.post("/api/chat", async (req, res) => {
     : message.trim();
 
   try {
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: [
-        ...toGeminiHistory(history),
-        { role: "user", parts: [{ text: prompt }] }
-      ],
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION
-      }
-    });
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: [
+          ...toGeminiHistory(history),
+          { role: "user", parts: [{ text: prompt }] }
+        ],
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION
+        }
+      }),
+      12000,
+      "Gemini"
+    );
 
     const reply = toSpeakableText(response.text ?? "");
 
     if (!reply) {
+      const fallback = fallbackReplyFromSonify(sonify);
+      if (fallback) {
+        return res.json({ reply: fallback, sonify, fallback: true });
+      }
+
       console.error(
         "GEMINI EMPTY REPLY:",
         response.candidates?.[0]?.finishReason ??
@@ -392,9 +513,14 @@ app.post("/api/chat", async (req, res) => {
       });
     }
 
-    res.json({ reply, sonify });
+    res.json({ reply, sonify, fallback: false });
   } catch (error) {
     logGeminiError(error);
+
+    const fallback = fallbackReplyFromSonify(sonify);
+    if (fallback) {
+      return res.json({ reply: fallback, sonify, fallback: true });
+    }
 
     if (error.status === 429 || error.status === 503) {
       return res.status(error.status).json({

@@ -1,3 +1,12 @@
+:root {
+  --ink: #f4f7fb;
+  --muted: #d7e0ea;
+  --accent: #7dd3fc;
+  --panel: rgba(8, 16, 28, 0.72);
+  --line: rgba(255, 255, 255, 0.22);
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -5,14 +14,25 @@
 html,
 body {
   margin: 0;
-  width: 100%;
   min-height: 100%;
+  color: var(--ink);
   font-family: "Avenir Next", "Segoe UI", Helvetica, Arial, sans-serif;
-  color: white;
+  background: #071018;
 }
 
 body {
+  overflow-x: hidden;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
   overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
 }
 
 .earth-interface {
@@ -20,164 +40,234 @@ body {
   min-height: 100vh;
   width: 100%;
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .earth-scene {
   position: absolute;
-  inset: -5%;
+  inset: 0;
+  background-color: #0b1c2c;
   background-image: url("https://svs.gsfc.nasa.gov/vis/a000000/a004900/a004960/atmos_rivers_narrated_4k.00090_print.jpg");
   background-size: cover;
   background-position: center;
-  animation: earthMovement 20s ease-in-out infinite alternate;
+  transform: scale(1.04);
+  animation: earthDrift 28s ease-in-out infinite alternate;
 }
 
 .scene-darkening {
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    180deg,
-    rgba(0, 0, 0, 0.18),
-    rgba(0, 0, 0, 0.45)
-  );
+  background:
+    linear-gradient(90deg, rgba(4, 10, 18, 0.78) 0%, rgba(4, 10, 18, 0.35) 55%, rgba(4, 10, 18, 0.2) 100%),
+    linear-gradient(180deg, rgba(4, 10, 18, 0.25), rgba(4, 10, 18, 0.55));
 }
 
 .interface-content {
   position: relative;
   z-index: 2;
-  width: 100%;
   min-height: 100vh;
-  padding: 40px;
+  padding: 28px clamp(20px, 4vw, 48px) 36px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  pointer-events: none;
+  gap: 28px;
 }
 
-.interface-content button {
-  pointer-events: auto;
+.top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .brand {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: clamp(1.35rem, 3vw, 2rem);
   font-weight: 700;
-  letter-spacing: 0.2em;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+  letter-spacing: 0.02em;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.45);
 }
 
-.welcome-area {
-  width: min(650px, 90%);
-  margin-left: 4vw;
-  margin-bottom: 5vh;
+.source-pill,
+.quick-actions button,
+#askButton,
+#talkButton {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink);
+  backdrop-filter: blur(10px);
+}
+
+.source-pill {
+  margin: 0;
+  padding: 8px 14px;
+  font-size: 0.82rem;
+}
+
+.stage {
+  width: min(640px, 100%);
+  padding: 28px 28px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 24px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+  animation: riseIn 700ms ease-out both;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 h1 {
-  margin: 0 0 22px;
+  margin: 0 0 14px;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(3.5rem, 9vw, 7rem);
+  font-size: clamp(2rem, 5vw, 3.2rem);
   font-weight: 400;
-  line-height: 0.9;
-  letter-spacing: -0.05em;
-  text-shadow: 0 4px 25px rgba(0, 0, 0, 0.35);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
 }
 
+.lead,
 #paMessage {
-  max-width: 600px;
-  margin: 0 0 28px;
-  font-size: clamp(1rem, 2vw, 1.25rem);
-  line-height: 1.6;
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+  margin: 0 0 22px;
+  max-width: 34rem;
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.55;
 }
 
-#talkButton {
-  border: 1px solid rgba(255, 255, 255, 0.7);
+.ask-form {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+#askInput {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 15px 25px;
-  background: rgba(255, 255, 255, 0.16);
-  color: white;
-  backdrop-filter: blur(10px);
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink);
   font-size: 1rem;
+}
+
+#askInput::placeholder {
+  color: rgba(244, 247, 251, 0.55);
+}
+
+#askInput:focus-visible,
+#askButton:focus-visible,
+#talkButton:focus-visible,
+.quick-actions button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+#askButton,
+#talkButton,
+.quick-actions button {
+  padding: 12px 16px;
+  font-size: 0.95rem;
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.2s ease, transform 0.2s ease;
+  transition: background 160ms ease, transform 160ms ease, opacity 160ms ease;
 }
 
-#talkButton:hover {
-  background: rgba(255, 255, 255, 0.28);
-  transform: translateY(-2px);
+#askButton:hover,
+#talkButton:hover,
+.quick-actions button:hover {
+  background: rgba(255, 255, 255, 0.18);
+  transform: translateY(-1px);
 }
 
-#talkButton:focus-visible {
-  outline: 3px solid white;
-  outline-offset: 4px;
-}
-
-#talkButton:disabled {
-  opacity: 0.6;
+#askButton:disabled,
+#talkButton:disabled,
+.quick-actions button:disabled {
+  opacity: 0.55;
   cursor: wait;
+  transform: none;
+}
+
+.quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
 }
 
 .status,
 .citation {
-  min-height: 24px;
-  margin-top: 14px;
-  font-size: 0.9rem;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  min-height: 1.2em;
+  margin: 12px 0 0;
+  color: #e8eef5;
+  font-size: 0.92rem;
+  line-height: 1.4;
 }
 
 .data-display {
-  margin-top: 14px;
-  font-size: 0.92rem;
-  line-height: 1.45;
-  color: #dbeafe;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  margin-top: 12px;
+  color: #cfe8ff;
+  font-size: 0.95rem;
+  line-height: 1.5;
 }
 
-.floating-controls {
-  display: flex;
-  gap: 12px;
-  align-self: flex-end;
+.citation {
+  color: rgba(231, 238, 245, 0.78);
+  font-size: 0.8rem;
 }
 
-.source-pill {
-  border: 1px solid rgba(255, 255, 255, 0.45);
-  border-radius: 999px;
-  padding: 10px 16px;
-  background: rgba(0, 0, 0, 0.18);
-  backdrop-filter: blur(8px);
-  font-size: 0.85rem;
-}
-
-@keyframes earthMovement {
+@keyframes earthDrift {
   from {
-    transform: scale(1.03) translate3d(0, 0, 0);
+    transform: scale(1.04) translate3d(0, 0, 0);
   }
   to {
-    transform: scale(1.1) translate3d(-1%, -1%, 0);
+    transform: scale(1.1) translate3d(-1.2%, -0.8%, 0);
+  }
+}
+
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
 @media (max-width: 700px) {
   .interface-content {
-    padding: 25px;
+    padding: 18px 16px 24px;
   }
 
-  .welcome-area {
-    margin-left: 0;
-    margin-bottom: 8vh;
+  .stage {
+    padding: 22px 18px;
   }
 
-  .floating-controls {
-    align-self: flex-start;
-    flex-wrap: wrap;
+  .ask-form {
+    grid-template-columns: 1fr;
+  }
+
+  #askButton,
+  #talkButton {
+    width: 100%;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .earth-scene {
+  .earth-scene,
+  .stage {
     animation: none;
   }
 }
