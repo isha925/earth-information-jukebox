@@ -136,17 +136,19 @@ In Chrome, go to:
 
 Do a hard refresh the first time (`Cmd+Shift+R` on Mac) so you get the latest page.
 
-### Step 6 — Try a 60-second demo
+### Step 6 — Try a voice-first demo (good for low vision)
 
-1. Click **Hear Kathmandu rain**  
-   - You should hear a short chirp, then rain (or a dry cue if that day was 0 mm)  
-   - Numbers appear under the buttons
-2. Type `rain in Tokyo` and click **Ask**
-3. Click **Hear global warming tone**
-4. (Optional) Set **Speak reply in** to Nepali or Japanese, then Ask again
-5. (Optional) Click **Talk**, allow the mic, and say `Kathmandu rainfall`
+You do **not** need to read the page.
 
-Click **Stop sound** anytime.
+1. Set **Answer language** (or leave Auto)  
+2. Click **Talk** (or press `Alt+T`) and allow the microphone  
+3. Wait for the spoken “I'm listening…” prompt **in that language**  
+4. Speak your question (Talk listens in the matching speech language; Nepali uses Hindi listening because Chrome has no Nepali mic language)  
+5. Hear NASA data as sound + a spoken answer  
+6. If **Keep listening after each answer** is checked, it listens again  
+7. Say `stop listening` (or the local equivalent) or press **Talk** / **Stop sound** to pause  
+
+You can still type and press **Ask**, or use the quick buttons.
 
 ---
 

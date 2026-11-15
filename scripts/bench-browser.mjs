@@ -88,6 +88,14 @@ async function main() {
     }
     ok("home");
 
+    // Keep conversation auto-listen off in automated benches.
+    await page.evaluate(() => {
+      const box = document.getElementById("keepTalking");
+      if (box) {
+        box.checked = false;
+      }
+    });
+
     const speech = await page.evaluate(() => ({
       hasWebkit: typeof window.webkitSpeechRecognition === "function",
       hasSpeech: typeof window.SpeechRecognition === "function",

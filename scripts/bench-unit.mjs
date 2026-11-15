@@ -70,10 +70,26 @@ if (!/function createRecognition/.test(appJs) || !/function startTalking/.test(a
   ok("talk-helpers", "createRecognition + startTalking");
 }
 
-if (!/Stopped listening|Starting microphone|Listening…/.test(appJs)) {
+if (!/Stopped listening|Starting microphone|Listening…|I'm listening/.test(appJs)) {
   fail("talk-ux-copy", "Talk status copy incomplete");
 } else {
   ok("talk-ux-copy");
+}
+
+if (!/keepTalking|maybeContinueConversation|Alt/.test(appJs)) {
+  fail("conversation-mode", "voice-first conversation helpers missing");
+} else {
+  ok("conversation-mode", "keep listening + shortcuts");
+}
+
+if (
+  !/function recognitionLanguageFor/.test(appJs) ||
+  !/LISTEN_PROMPTS/.test(appJs) ||
+  !/instance\.lang = sttLang/.test(appJs)
+) {
+  fail("talk-language-aware", "Talk STT language wiring missing");
+} else {
+  ok("talk-language-aware", "STT follows answer language");
 }
 
 if (!/function isDryPrecipitation/.test(appJs) || !/function playDryDayCue/.test(appJs)) {
