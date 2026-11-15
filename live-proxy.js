@@ -23,6 +23,25 @@ function safeSend(ws, payload) {
   }
 }
 
+function friendlyGoogleBusyMessage(raw, statusCode) {
+  const text = String(raw || "");
+  const code = Number(statusCode) || 0;
+  if (
+    code === 429 ||
+    code === 503 ||
+    code === 500 ||
+    /RESOURCE_EXHAUSTED|UNAVAILABLE|overloaded|high demand|quota|try again|deadline|timed out|timeout/i.test(
+      text
+    )
+  ) {
+    return "Google's servers look busy or not responding. Try again in a few minutes.";
+  }
+  if (/401|403|API key|PERMISSION|UNAUTHENTICATED/i.test(text)) {
+    return "Gemini API key is missing or invalid on this machine. Check .env and restart the server.";
+  }
+  return text || "Talk Live failed. Try again in a few minutes.";
+}
+
 function attachLiveProxy(httpServer, deps) {
   const { apiKey, fetchNasaPower, fetchGistempAnnual } = deps;
   const wss = new WebSocketServer({ server: httpServer, path: "/api/live" });
@@ -80,6 +99,9 @@ function attachLiveProxy(httpServer, deps) {
                   }
                 }
               },
+              // So the UI can show “heard you / answering” while latency is high.
+              inputAudioTranscription: {},
+              outputAudioTranscription: {},
               systemInstruction: {
                 parts: [{ text: instruction }]
               },
@@ -127,9 +149,13 @@ function attachLiveProxy(httpServer, deps) {
         }
 
         if (msg.error) {
+          const code = msg.error.code || msg.error.status;
           safeSend(client, {
             type: "error",
-            message: msg.error.message || "Live API error"
+            message: friendlyGoogleBusyMessage(
+              msg.error.message || "Live API error",
+              code
+            )
           });
           return;
         }
@@ -179,6 +205,11 @@ function attachLiveProxy(httpServer, deps) {
 
         const toolCall = msg.toolCall;
         if (toolCall?.functionCalls?.length) {
+          safeSend(client, {
+            type: "phase",
+            phase: "nasa",
+            message: "Fetching NASA data for your question…"
+          });
           const functionResponses = [];
           for (const call of toolCall.functionCalls) {
             try {
@@ -233,6 +264,11 @@ function attachLiveProxy(httpServer, deps) {
             }
           }
           if (gemini?.readyState === WebSocket.OPEN) {
+            safeSend(client, {
+              type: "phase",
+              phase: "thinking",
+              message: "NASA data ready — Google is preparing your spoken answer…"
+            });
             gemini.send(
               JSON.stringify({
                 toolResponse: { functionResponses }
@@ -250,7 +286,7 @@ function attachLiveProxy(httpServer, deps) {
         res.on("end", () => {
           safeSend(client, {
             type: "error",
-            message: `Live connect HTTP ${res.statusCode}: ${body.slice(0, 180)}`
+            message: friendlyGoogleBusyMessage(body, res.statusCode)
           });
           closeAll();
         });
@@ -259,7 +295,9 @@ function attachLiveProxy(httpServer, deps) {
       gemini.on("error", (error) => {
         safeSend(client, {
           type: "error",
-          message: error.message || "Live WebSocket error"
+          message: friendlyGoogleBusyMessage(
+            error.message || "Live WebSocket error"
+          )
         });
       });
 

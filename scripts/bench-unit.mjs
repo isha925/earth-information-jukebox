@@ -119,6 +119,17 @@ if (
 }
 
 if (
+  !/liveProcessCue/.test(liveClient) ||
+  !/setProcessCue/.test(liveClient) ||
+  !/BUSY_MESSAGE/.test(liveClient) ||
+  !/friendlyGoogleBusyMessage/.test(liveProxy)
+) {
+  fail("live-process-cue", "processing banner / busy Google errors missing");
+} else {
+  ok("live-process-cue", "visual process cue + Google busy copy");
+}
+
+if (
   !/function recognitionLanguageFor/.test(appJs) ||
   !/LISTEN_PROMPTS/.test(appJs) ||
   !/instance\.lang = sttLang/.test(appJs)

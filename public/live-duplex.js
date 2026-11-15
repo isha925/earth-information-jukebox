@@ -10,9 +10,14 @@
   const dataDisplay = document.getElementById("dataDisplay");
   const replyLanguageSelect = document.getElementById("replyLanguage");
   const voiceSupportNote = document.getElementById("voiceSupportNote");
+  const processCue = document.getElementById("liveProcessCue");
+  const processCueText = document.getElementById("liveProcessCueText");
 
   const INPUT_RATE = 16000;
   const OUTPUT_RATE = 24000;
+  const ANSWER_WATCHDOG_MS = 22000;
+  const BUSY_MESSAGE =
+    "Google's servers look busy or not responding. Try again in a few minutes.";
 
   let ws = null;
   let liveActive = false;
@@ -25,11 +30,64 @@
   let activeSources = [];
   let modelTranscript = "";
   let liveAvailable = null; // null = unknown, boolean after health probe
+  let answerWatchdog = null;
+  let awaitingAnswer = false;
 
   function setStatus(text) {
     if (statusMessage) {
       statusMessage.textContent = text;
     }
+  }
+
+  function setProcessCue(phase, message) {
+    if (!processCue || !processCueText) {
+      return;
+    }
+    if (!phase || phase === "idle") {
+      processCue.hidden = true;
+      processCue.classList.remove("is-error", "is-listening");
+      processCueText.textContent = "";
+      return;
+    }
+    processCue.hidden = false;
+    processCue.classList.toggle("is-error", phase === "error");
+    processCue.classList.toggle("is-listening", phase === "listening");
+    processCueText.textContent = message || "Working…";
+    processCue.dataset.phase = phase;
+  }
+
+  function clearAnswerWatchdog() {
+    if (answerWatchdog) {
+      clearTimeout(answerWatchdog);
+      answerWatchdog = null;
+    }
+  }
+
+  function armAnswerWatchdog() {
+    clearAnswerWatchdog();
+    awaitingAnswer = true;
+    answerWatchdog = setTimeout(() => {
+      if (!liveActive || !awaitingAnswer) {
+        return;
+      }
+      setProcessCue("error", BUSY_MESSAGE);
+      setStatus(BUSY_MESSAGE);
+    }, ANSWER_WATCHDOG_MS);
+  }
+
+  function friendlyClientError(raw) {
+    const text = String(raw || "");
+    if (
+      /busy|not responding|RESOURCE_EXHAUSTED|UNAVAILABLE|429|503|quota|overloaded|timed out|timeout/i.test(
+        text
+      )
+    ) {
+      return BUSY_MESSAGE;
+    }
+    if (/API key|401|403|UNAUTHENTICATED|invalid/i.test(text)) {
+      return "Gemini API key is missing or invalid on this machine. Check .env and restart the server.";
+    }
+    return text || BUSY_MESSAGE;
   }
 
   function setTalkLiveUi(on) {
@@ -41,6 +99,11 @@
     talkButton.classList.toggle("is-live", on);
     talkButton.setAttribute("aria-pressed", on ? "true" : "false");
     talkButton.textContent = on ? "Live… (click to stop)" : "Talk";
+    if (!on) {
+      clearAnswerWatchdog();
+      awaitingAnswer = false;
+      setProcessCue("idle");
+    }
   }
 
   function clearPlayback() {
@@ -108,6 +171,12 @@
     activeSources.push(source);
     source.onended = () => {
       activeSources = activeSources.filter((s) => s !== source);
+      if (liveActive && activeSources.length === 0 && !awaitingAnswer) {
+        setProcessCue(
+          "listening",
+          "Listening — ask another place, or press Stop"
+        );
+      }
     };
   }
 
@@ -275,6 +344,7 @@
 
     modelTranscript = "";
     setTalkLiveUi(true);
+    setProcessCue("connecting", "Connecting to Google Live…");
     setStatus("Connecting Talk over Gemini Live…");
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -291,12 +361,15 @@
       ws = new WebSocket(`${proto}://${location.host}/api/live`);
 
       const failTimer = setTimeout(() => {
-        stopLive("Talk Live timed out. You can type a question instead.");
+        const message = BUSY_MESSAGE;
+        setProcessCue("error", message);
+        stopLive(message);
         finish(false);
       }, 15000);
 
       ws.onopen = async () => {
         const language = replyLanguageSelect?.value || "en-US";
+        setProcessCue("connecting", "Connected — starting microphone…");
         ws.send(JSON.stringify({ type: "start", language }));
         try {
           await startCapture();
@@ -317,6 +390,10 @@
 
         if (msg.type === "ready") {
           clearTimeout(failTimer);
+          setProcessCue(
+            "listening",
+            "Listening — ask about rain in a city or global temperature"
+          );
           setStatus(
             msg.message ||
               "Talk is live — speak anytime; you can interrupt. NASA tools stay on."
@@ -332,16 +409,38 @@
           finish(true);
           return;
         }
+        if (msg.type === "phase") {
+          setProcessCue(msg.phase || "thinking", msg.message || "Working…");
+          setStatus(msg.message || "Working…");
+          if (msg.phase === "thinking" || msg.phase === "nasa") {
+            armAnswerWatchdog();
+          }
+          return;
+        }
         if (msg.type === "audio") {
+          awaitingAnswer = false;
+          clearAnswerWatchdog();
+          setProcessCue("speaking", "Speaking your NASA answer…");
           await playPcmBase64(msg.data, msg.mimeType);
           return;
         }
         if (msg.type === "interrupted") {
           clearPlayback();
+          awaitingAnswer = false;
+          clearAnswerWatchdog();
+          setProcessCue("listening", "Interrupted — still listening…");
           setStatus("Interrupted — still listening…");
           return;
         }
         if (msg.type === "transcript") {
+          if (msg.role === "user" && msg.text) {
+            setProcessCue(
+              "heard",
+              `Heard you — processing: “${String(msg.text).trim().slice(0, 80)}”`
+            );
+            setStatus("Heard you — fetching answer…");
+            armAnswerWatchdog();
+          }
           if (msg.role === "model" && msg.text) {
             modelTranscript += msg.text;
             if (paMessage) {
@@ -351,12 +450,17 @@
           return;
         }
         if (msg.type === "nasa") {
+          setProcessCue("nasa", "NASA data received — preparing spoken answer…");
           handleNasa(msg);
+          armAnswerWatchdog();
           return;
         }
         if (msg.type === "error") {
           clearTimeout(failTimer);
-          stopLive(msg.message || "Talk Live failed");
+          clearAnswerWatchdog();
+          const message = friendlyClientError(msg.message);
+          setProcessCue("error", message);
+          stopLive(message);
           finish(false);
           return;
         }
@@ -371,7 +475,9 @@
 
       ws.onerror = () => {
         clearTimeout(failTimer);
-        stopLive("Talk Live connection failed.");
+        const message = BUSY_MESSAGE;
+        setProcessCue("error", message);
+        stopLive(message);
         finish(false);
       };
 

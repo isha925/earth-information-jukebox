@@ -138,6 +138,19 @@ In Chrome, go to:
 
 Do a hard refresh the first time (`Cmd+Shift+R` on Mac) so you get the latest page.
 
+### If Talk works on one machine but not another
+
+On the machine where it fails, check in order:
+
+1. Pull latest branch / hard-refresh (`Cmd+Shift+R`)
+2. `.env` has a real `GEMINI_API_KEY` (not the example placeholder)
+3. Restart with: `env -u GEMINI_API_KEY -u GOOGLE_API_KEY npm start`
+4. Open **http://localhost:3000/api/health** — you want `"liveDuplex": true`
+5. Use **Chrome or Edge** (not Safari) and allow the microphone
+6. If the banner says Google is busy, wait a few minutes and try Talk again (free-tier Live can throttle)
+
+While waiting for an answer, a **processing banner** under the status line shows Connecting / Listening / Heard you / Fetching NASA / Speaking.
+
 ### Step 6 — Try a voice-first demo (good for low vision)
 
 You do **not** need to read the page.

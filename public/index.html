@@ -119,6 +119,16 @@
         </div>
 
         <p id="statusMessage" class="status" aria-live="polite"></p>
+        <div
+          id="liveProcessCue"
+          class="live-process-cue"
+          hidden
+          role="status"
+          aria-live="polite"
+        >
+          <span class="live-process-spinner" aria-hidden="true"></span>
+          <span id="liveProcessCueText" class="live-process-text">Working…</span>
+        </div>
         <div id="dataDisplay" class="data-display" aria-live="polite"></div>
         <p id="citationLine" class="citation"></p>
         <p class="a11y-hint">
