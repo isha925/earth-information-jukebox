@@ -83,7 +83,8 @@ const RECOGNITION_ERRORS = {
   "audio-capture": "No microphone was found. Type your question instead.",
   "not-allowed": "Microphone access was blocked. Allow mic for localhost in Chrome, then try Talk again.",
   "service-not-allowed": "Speech recognition is blocked here. Use Chrome/Edge over http://localhost:3000.",
-  network: "Speech recognition needs an internet connection (Chrome uses Google's speech service).",
+  network:
+    "Chrome's built-in speech service failed. Talk normally uses Gemini Live instead — press Talk again, or type your question.",
   aborted: "Listening was stopped.",
   "language-not-supported": "That speech language isn't supported in this browser."
 };
@@ -149,13 +150,14 @@ function setBusy() {
     askInput.disabled = thinking;
   }
   if (talkButton) {
-    const speechAvailable = Boolean(
-      window.SpeechRecognition || window.webkitSpeechRecognition
-    );
-    talkButton.disabled = thinking || !speechAvailable;
-    talkButton.textContent = listening ? "Listening… (click to stop)" : "Talk";
-    talkButton.classList.toggle("is-listening", listening);
-    talkButton.setAttribute("aria-pressed", listening ? "true" : "false");
+    // Live Talk does not need Chrome SpeechRecognition; keep Talk clickable.
+    const liveOn = Boolean(window.jukeboxLiveActive?.());
+    talkButton.disabled = thinking && !liveOn;
+    if (!liveOn) {
+      talkButton.textContent = listening ? "Listening… (click to stop)" : "Talk";
+      talkButton.classList.toggle("is-listening", listening);
+      talkButton.setAttribute("aria-pressed", listening ? "true" : "false");
+    }
   }
 }
 
@@ -190,6 +192,9 @@ function stopEverything(statusText = "Stopped.") {
     } catch (_error) {
       // ignore
     }
+  }
+  if (typeof window.jukeboxStopLive === "function") {
+    window.jukeboxStopLive();
   }
   stopActiveAudio();
   if (synth) {
@@ -1335,15 +1340,36 @@ async function startTalking(options = {}) {
   const prompted = Boolean(options.prompted);
   const fromConversation = Boolean(options.fromConversation);
 
-  if (!getSpeechRecognitionCtor()) {
-    const message =
-      "Speech recognition needs Chrome or Edge. You can still type a question and press Ask.";
-    setState("idle", message);
-    await speak(message, FALLBACK_LANGUAGE);
+  if (state === "thinking") {
     return;
   }
 
-  if (state === "thinking") {
+  // Prefer Gemini Live duplex Talk — avoids Chrome SpeechRecognition "network" flakes.
+  if (!fromConversation && typeof window.jukeboxStartLiveTalk === "function") {
+    const liveOk =
+      typeof window.jukeboxLiveAvailable === "function"
+        ? await window.jukeboxLiveAvailable()
+        : true;
+    if (liveOk || window.jukeboxLiveActive?.()) {
+      const started = await window.jukeboxStartLiveTalk();
+      if (started || window.jukeboxLiveActive?.()) {
+        conversationActive = true;
+        suppressAutoListen = true; // Live session owns turn-taking
+        setState("idle");
+        return;
+      }
+      setState(
+        "idle",
+        "Live Talk could not start. Falling back to Chrome speech, or type a question."
+      );
+    }
+  }
+
+  if (!getSpeechRecognitionCtor()) {
+    const message =
+      "Talk needs Gemini Live (API key) or Chrome/Edge speech. You can still type a question and press Ask.";
+    setState("idle", message);
+    await speak(message, FALLBACK_LANGUAGE);
     return;
   }
 
@@ -1425,15 +1451,16 @@ async function startTalking(options = {}) {
   }
 }
 
-if (!getSpeechRecognitionCtor()) {
-  talkButton.disabled = true;
-  talkButton.title = "Speech recognition needs Chrome or Edge";
-  statusMessage.textContent =
-    "Talk needs Chrome or Edge. You can still type a question or use the quick buttons.";
-} else {
+// Talk stays enabled: Live path does not need Chrome SpeechRecognition.
+talkButton.disabled = false;
+talkButton.title =
+  "Talk uses Gemini Live duplex when available (fallback: Chrome speech)";
+if (getSpeechRecognitionCtor()) {
   recognition = createRecognition();
-  setBusy();
 }
+setBusy();
+statusMessage.textContent =
+  "Ready. Press Talk for live conversation (Gemini), or type a question.";
 
 askForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -1493,3 +1520,11 @@ loadDefaultTrack();
 // Spoken orientation for screen-reader / voice-first users who land on the page.
 statusMessage.textContent =
   "Ready. Press Talk, or Alt+T, and ask about rain in a city or global temperature.";
+
+// Hooks for the optional Live duplex demo (live-duplex.js).
+window.jukeboxStopEverything = stopEverything;
+window.jukeboxApplyLiveSonify = (sonify) => {
+  applySonify(sonify).catch((error) => {
+    console.error("Live sonify failed:", error);
+  });
+};
