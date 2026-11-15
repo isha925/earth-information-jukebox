@@ -141,7 +141,77 @@ function toSpeakableText(text) {
     .trim();
 }
 
+function geminiErrorStatus(error) {
+  const direct = Number(error?.status || error?.statusCode || 0);
+  if (direct) {
+    return direct;
+  }
+  const msg = String(error?.message || "");
+  if (/"code"\s*:\s*429|RESOURCE_EXHAUSTED|quota exceeded|rate limit/i.test(msg)) {
+    return 429;
+  }
+  if (/"code"\s*:\s*503|UNAVAILABLE|overloaded/i.test(msg)) {
+    return 503;
+  }
+  if (/"code"\s*:\s*401|UNAUTHENTICATED/i.test(msg)) {
+    return 401;
+  }
+  if (/"code"\s*:\s*403|PERMISSION_DENIED/i.test(msg)) {
+    return 403;
+  }
+  return 0;
+}
+
+/** Top-class user errors: what happened, why, what to do next. */
+function explainProblem({ code, what, why, next }) {
+  const payload = {
+    code: code || "error",
+    what: String(what || "Something went wrong."),
+    why: String(why || ""),
+    next: String(next || "Please try again."),
+  };
+  payload.error = [payload.what, payload.why, payload.next]
+    .filter(Boolean)
+    .join(" ");
+  return payload;
+}
+
+function explainGeminiFailure(error) {
+  const status = geminiErrorStatus(error);
+  if (status === 429) {
+    return explainProblem({
+      code: "gemini_quota",
+      what: "Google Gemini could not answer right now.",
+      why: "This Google Cloud project's free daily Gemini quota is used up. Quota is per project — extra API keys in the same project share the same limit.",
+      next: "Try a clear city rain question like “rain in Tokyo” (NASA POWER can still answer without Gemini), wait until midnight Pacific, or put a GEMINI_API_KEY from a different Google account/project in .env and restart."
+    });
+  }
+  if (status === 503) {
+    return explainProblem({
+      code: "gemini_busy",
+      what: "Google Gemini is temporarily overloaded.",
+      why: "Google's servers returned a busy/unavailable response.",
+      next: "Wait a minute and try again. NASA rain/temperature sound can still work while Gemini is busy."
+    });
+  }
+  if (status === 401 || status === 403) {
+    return explainProblem({
+      code: "gemini_auth",
+      what: "Gemini rejected this project's API key.",
+      why: "The key is missing, invalid, or not allowed for this model.",
+      next: "Create a key at https://aistudio.google.com/apikey, put it in .env as GEMINI_API_KEY, then restart with: env -u GEMINI_API_KEY -u GOOGLE_API_KEY npm start"
+    });
+  }
+  return explainProblem({
+    code: "gemini_failed",
+    what: "Gemini did not return a spoken answer.",
+    why: String(error?.message || "Unknown Gemini error.").slice(0, 180),
+    next: "Try “rain in Tokyo” or “global temperature”. If it keeps failing, check the server terminal for GEMINI ERROR lines."
+  });
+}
+
 function logGeminiError(error) {
+  const status = geminiErrorStatus(error);
   const hints = {
     400: "Gemini rejected the request. Check GEMINI_API_KEY and GEMINI_MODEL in .env.",
     401: "GEMINI_API_KEY is not valid. Create one at https://aistudio.google.com/apikey.",
@@ -151,10 +221,10 @@ function logGeminiError(error) {
     503: "Gemini is temporarily overloaded. Retry shortly."
   };
 
-  console.error("GEMINI ERROR:", error.status ?? "", error.message);
+  console.error("GEMINI ERROR:", status || "", error.message);
 
-  if (hints[error.status]) {
-    console.error("Hint:", hints[error.status]);
+  if (hints[status]) {
+    console.error("Hint:", hints[status]);
   }
 }
 
@@ -276,6 +346,10 @@ const PLACE_ALIASES = {
   paris: { name: "Paris", country: "France", lat: 48.8566, lon: 2.3522 },
   miami: { name: "Miami", country: "United States", lat: 25.7617, lon: -80.1918 },
   houston: { name: "Houston", country: "United States", lat: 29.7604, lon: -95.3698 },
+  // US states → a representative city point (POWER is point data, not a whole-state average).
+  texas: { name: "Austin", country: "United States", lat: 30.2672, lon: -97.7431, labelHint: "Texas (Austin area)" },
+  california: { name: "Los Angeles", country: "United States", lat: 34.0522, lon: -118.2437, labelHint: "California (Los Angeles area)" },
+  florida: { name: "Miami", country: "United States", lat: 25.7617, lon: -80.1918, labelHint: "Florida (Miami area)" },
   lagos: { name: "Lagos", country: "Nigeria", lat: 6.5244, lon: 3.3792 },
   nairobi: { name: "Nairobi", country: "Kenya", lat: -1.2921, lon: 36.8219 },
   dhaka: { name: "Dhaka", country: "Bangladesh", lat: 23.8103, lon: 90.4125 },
@@ -322,6 +396,38 @@ function extractPlaceQuery(message) {
   return null;
 }
 
+function placeFromAlias(alias) {
+  const labelName = alias.labelHint || alias.name;
+  return {
+    name: labelName,
+    country: alias.country || "",
+    lat: alias.lat,
+    lon: alias.lon,
+    resolvedFrom: "alias"
+  };
+}
+
+function pickGeocodeHit(raw, results) {
+  const list = Array.isArray(results) ? results : [];
+  if (!list.length) {
+    return null;
+  }
+  const wanted = String(raw || "").toLowerCase();
+  const exactUs = list.find(
+    (hit) =>
+      String(hit.country_code || "").toUpperCase() === "US" &&
+      (String(hit.name || "").toLowerCase() === wanted ||
+        String(hit.admin1 || "").toLowerCase() === wanted)
+  );
+  if (exactUs) {
+    return exactUs;
+  }
+  const exactName = list.find(
+    (hit) => String(hit.name || "").toLowerCase() === wanted
+  );
+  return exactName || list[0];
+}
+
 async function geocodePlace(placeQuery) {
   const raw = String(placeQuery || "").trim();
   if (!raw) {
@@ -330,7 +436,7 @@ async function geocodePlace(placeQuery) {
 
   const key = raw.toLowerCase().replace(/\s+/g, " ");
   if (PLACE_ALIASES[key]) {
-    return { ...PLACE_ALIASES[key], resolvedFrom: "alias" };
+    return placeFromAlias(PLACE_ALIASES[key]);
   }
 
   if (geocodeCache.has(key)) {
@@ -339,17 +445,19 @@ async function geocodePlace(placeQuery) {
 
   const url =
     `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(raw)}` +
-    `&count=1&language=en&format=json`;
+    `&count=5&language=en&format=json`;
   const response = await fetch(url, {
     headers: { Accept: "application/json", "User-Agent": "EarthInformationJukebox/1.0" }
   });
   if (!response.ok) {
-    throw new Error(`Geocoder HTTP ${response.status}`);
+    throw new Error(
+      `Could not look up “${raw}” right now (geocoder HTTP ${response.status}). Try a city name like Austin or Tokyo.`
+    );
   }
   const data = await response.json();
-  const hit = data?.results?.[0];
+  const hit = pickGeocodeHit(raw, data?.results);
   if (!hit) {
-    throw new Error(`Could not find a location named “${raw}”. Try another city or place.`);
+    throw new Error(`Could not find a location named “${raw}”. Try a city name like Austin, Texas or Tokyo.`);
   }
 
   const place = {
@@ -451,6 +559,7 @@ async function fetchNasaPower(options = {}) {
   );
 
   const placeLabel = place.country ? `${place.name}, ${place.country}` : place.name;
+  // placeLabel already includes alias hints such as "Texas (Austin area)".
 
   return {
     trackId: "atmospheric-river",
@@ -651,7 +760,22 @@ app.get("/api/nasa-weather", async (req, res) => {
     res.json(payload);
   } catch (error) {
     console.error("NASA POWER Error:", error);
-    res.status(500).json({ error: error.message || "Failed to fetch NASA POWER climate data." });
+    const message = error.message || "Failed to fetch NASA POWER climate data.";
+    const missingPlace = /could not find a location|try a city name|geocoder/i.test(message);
+    const problem = missingPlace
+      ? explainProblem({
+          code: "place_not_found",
+          what: "Could not resolve that place for NASA POWER.",
+          why: message,
+          next: "Ask with a city name (for example “rain in Austin” or “rain in Tokyo”), not only a broad region word if lookup fails."
+        })
+      : explainProblem({
+          code: "nasa_power_failed",
+          what: "NASA POWER weather lookup failed.",
+          why: message,
+          next: "Check your internet connection and try again in a moment. The server log shows the detailed NASA/geocoder error."
+        });
+    res.status(missingPlace ? 404 : 502).json(problem);
   }
 });
 
@@ -787,8 +911,9 @@ app.post("/api/tts", async (req, res) => {
     res.send(audio.wav);
   } catch (error) {
     console.error("TTS ERROR:", error.message);
-    res.status(502).json({
-      error: error.message || "Could not synthesize speech.",
+    const problem = explainGeminiFailure(error);
+    res.status(geminiErrorStatus(error) === 429 ? 429 : 502).json({
+      ...problem,
       fallbackToBrowser: true
     });
   }
@@ -1088,9 +1213,14 @@ app.post("/api/chat", async (req, res) => {
           "unknown"
       );
 
-      return res.status(502).json({
-        error: "I don't have an answer for that. Could you try asking another way?"
-      });
+      return res.status(502).json(
+        explainProblem({
+          code: "gemini_empty",
+          what: "Gemini returned an empty answer.",
+          why: "The model produced no speakable text for this question.",
+          next: "Try asking another way, for example “rain in Tokyo” or “global temperature”."
+        })
+      );
     }
 
     res.json({ reply, sonify, fallback: false, replyLanguage: language });
@@ -1103,18 +1233,19 @@ app.post("/api/chat", async (req, res) => {
         reply: fallback,
         sonify,
         fallback: true,
-        replyLanguage: language
+        replyLanguage: language,
+        notice: explainProblem({
+          code: "gemini_fallback_nasa",
+          what: "Gemini was unavailable, so the app used NASA numbers directly.",
+          why: "Google Gemini failed or hit a free-tier limit.",
+          next: "You can keep asking city rain / global temperature questions; spoken AI chat may stay limited until quota resets."
+        })
       });
     }
 
-    if (error.status === 429 || error.status === 503) {
-      return res.status(error.status).json({
-        error:
-          "Google's servers look busy or not responding. Try again in a few minutes."
-      });
-    }
-
-    res.status(502).json({ error: "The PA could not respond. Please try again." });
+    const status = geminiErrorStatus(error) || 502;
+    const problem = explainGeminiFailure(error);
+    res.status(status === 429 || status === 503 ? status : 502).json(problem);
   }
 });
 

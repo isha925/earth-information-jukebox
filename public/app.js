@@ -224,6 +224,41 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Top-class user problem: what happened, why, what to do next.
+ * Prefer structured {what,why,next} from the API; fall back to a single string.
+ */
+function showProblem(problem, options = {}) {
+  const payload =
+    typeof problem === "string"
+      ? { what: problem, why: "", next: "" }
+      : problem && typeof problem === "object"
+        ? problem
+        : { what: "Something went wrong.", why: "", next: "Please try again." };
+  const what = String(payload.what || payload.error || "Something went wrong.").trim();
+  const why = String(payload.why || "").trim();
+  const next = String(payload.next || "").trim();
+  const lines = [what, why, next].filter(Boolean);
+  if (paMessage && !options.keepPaMessage) {
+    paMessage.textContent = lines.join("\n\n");
+  }
+  if (statusMessage) {
+    statusMessage.textContent = what;
+  }
+  const cue = document.getElementById("liveProcessCue");
+  const cueText = document.getElementById("liveProcessCueText");
+  if (cue && cueText && !options.silentCue) {
+    cue.hidden = false;
+    cue.classList.add("is-error");
+    cue.classList.remove("is-listening");
+    cueText.textContent = lines.join(" — ");
+    cue.dataset.phase = "error";
+  }
+  return lines.join(" ");
+}
+
+window.jukeboxShowProblem = showProblem;
+
 // SpeechRecognition language for Talk. Auto stays English so city names are reliable.
 function selectedListenLanguage() {
   const selected = replyLanguageSelect?.value || "auto";
@@ -989,7 +1024,11 @@ async function playNasaDirect(kind, question = "") {
     const response = await fetch(`/api/nasa-weather?${params.toString()}`);
     const data = await response.json();
     if (!response.ok || data.error) {
-      throw new Error(data.error || "NASA POWER failed");
+      const err = new Error(
+        data.error || data.what || "NASA POWER failed"
+      );
+      err.problem = data.what || data.why ? data : null;
+      throw err;
     }
     const niceDate = formatNasaDate(data.date);
     const placeLabel = data.location?.label || data.location?.name || place;
@@ -1092,7 +1131,14 @@ async function askPA(question) {
     }
   } catch (error) {
     console.error("NASA direct play failed:", error);
-    statusMessage.textContent = error.message;
+    showProblem(
+      error.problem || {
+        what: "NASA weather lookup failed for that place.",
+        why: error.message || "Unknown NASA/geocoder error.",
+        next: "Try a city name like Austin or Tokyo. Broad region words may need a city."
+      },
+      { keepPaMessage: false }
+    );
   }
 
   const placeHint = {
@@ -1120,7 +1166,12 @@ async function askPA(question) {
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok || !data.reply) {
-      throw new Error(data.error || "The PA could not respond. Please try again.");
+      const err = new Error(
+        data.error || data.what || "The PA could not respond. Please try again."
+      );
+      err.problem = data.what || data.why ? data : null;
+      err.status = response.status;
+      throw err;
     }
 
     history.push(
@@ -1143,6 +1194,9 @@ async function askPA(question) {
     }
 
     paMessage.textContent = finalReply;
+    if (data.notice?.what) {
+      showProblem(data.notice, { keepPaMessage: true, silentCue: false });
+    }
     const langNote = langPlan.fellBackToEnglish
       ? ` · no regional voice installed, English`
       : langPlan.usedRelatedVoice
@@ -1151,7 +1205,7 @@ async function askPA(question) {
           ? ` · speaking ${speakLang}`
           : "";
     statusMessage.textContent = data.fallback
-      ? `Latest available POWER data. You asked: “${trimmed}”${langNote}`
+      ? `NASA numbers spoken (Gemini unavailable). You asked: “${trimmed}”${langNote}`
       : `You asked: “${trimmed}”${langNote}`;
 
     if (!isCurrentRun(token)) {
@@ -1177,21 +1231,47 @@ async function askPA(question) {
       return;
     }
     if (direct?.reply) {
+      showProblem(
+        error.problem || {
+          code: "gemini_fallback_nasa",
+          what: "Gemini could not add a spoken summary — playing NASA numbers instead.",
+          why: error.message || "Chat request failed.",
+          next: "City rain / global temperature still work from NASA. Gemini chat returns after quota reset or a key from another project."
+        },
+        { keepPaMessage: true }
+      );
+      paMessage.textContent = direct.reply;
       statusMessage.textContent =
-        "Played the latest available POWER day. Spoken summary used English NASA text.";
+        "Played NASA POWER data. Gemini spoken summary unavailable.";
       await speak(direct.reply, FALLBACK_LANGUAGE);
       if (isCurrentRun(token) && !suppressAutoListen) {
         await maybeContinueConversation(FALLBACK_LANGUAGE);
       }
     } else {
-      let message = error.message;
-      if (error.name === "AbortError") {
-        message = "That took too long. Please try again.";
-      } else if (error instanceof TypeError) {
-        message = "I can't reach the Jukebox server. Please check that it's running.";
+      let problem = error.problem;
+      if (!problem) {
+        if (error.name === "AbortError") {
+          problem = {
+            what: "That took too long.",
+            why: "The chat request timed out before Gemini or NASA finished.",
+            next: "Try again, or ask a shorter city rain question like “rain in Tokyo”."
+          };
+        } else if (error instanceof TypeError) {
+          problem = {
+            what: "Cannot reach the Jukebox server.",
+            why: "The browser could not connect to localhost.",
+            next: "In a terminal run: env -u GEMINI_API_KEY -u GOOGLE_API_KEY npm start"
+          };
+        } else {
+          problem = {
+            what: "The PA could not respond.",
+            why: error.message || "Unknown chat error.",
+            next: "Try “rain in Tokyo” or “global temperature”. Check the server terminal for details."
+          };
+        }
       }
-      statusMessage.textContent = message;
-      await speak(message, FALLBACK_LANGUAGE);
+      const spoken = showProblem(problem);
+      await speak(spoken, FALLBACK_LANGUAGE);
     }
   } finally {
     clearTimeout(timer);
@@ -1363,16 +1443,40 @@ async function startTalking(options = {}) {
         setState("idle");
         return;
       }
+      // Wake → Live failed: do NOT fall into Chrome STT (that is the ~3s
+      // “Listening…” then drop). Keep the Live error on screen and stay idle.
+      if (fromWake) {
+        showProblem({
+          code: "wake_live_failed",
+          what: "Heard the wake phrase, but Live Talk did not stay open.",
+          why: "Usually the mic was still held by wake-word recognition, or Gemini Live hit a quota/busy error.",
+          next: "Untick “Hey Jukebox”, press Talk, then speak. Or type “rain in Tokyo”. Wake word can be re-enabled after Talk works."
+        });
+        setState("idle");
+        return;
+      }
       setState(
         "idle",
-        "Live Talk could not start. Falling back to Chrome speech, or type a question."
+        "Live Talk could not start — trying Chrome speech, or type a question."
       );
+    } else if (fromWake) {
+      showProblem({
+        code: "live_unavailable",
+        what: "Wake word heard, but Gemini Live is not available.",
+        why: "Server health says live duplex is off (missing GEMINI_API_KEY or Live disabled).",
+        next: "Add GEMINI_API_KEY to .env, restart the server, then press Talk — or type your question."
+      });
+      setState("idle");
+      return;
     }
   }
 
   if (!getSpeechRecognitionCtor()) {
-    const message =
-      "Talk needs Gemini Live (API key) or Chrome/Edge speech. You can still type a question and press Ask.";
+    const message = showProblem({
+      what: "Talk needs Gemini Live or Chrome/Edge speech.",
+      why: "Neither Live duplex nor browser SpeechRecognition is available.",
+      next: "Type a question and press Ask, or fix GEMINI_API_KEY and use Chrome/Edge."
+    });
     setState("idle", message);
     await speak(message, FALLBACK_LANGUAGE);
     return;

@@ -18,6 +18,8 @@
   const ANSWER_WATCHDOG_MS = 22000;
   const BUSY_MESSAGE =
     "Google's servers look busy or not responding. Try again in a few minutes.";
+  // Wake-word Chrome SpeechRecognition must fully release the mic before Live capture.
+  const MIC_HANDOFF_MS = 700;
 
   let ws = null;
   let liveActive = false;
@@ -75,19 +77,50 @@
     }, ANSWER_WATCHDOG_MS);
   }
 
-  function friendlyClientError(raw) {
-    const text = String(raw || "");
+  function formatProblem(problem) {
+    if (!problem) {
+      return BUSY_MESSAGE;
+    }
+    if (typeof window.jukeboxShowProblem === "function") {
+      window.jukeboxShowProblem(problem);
+    }
+    const parts = [problem.what, problem.why, problem.next].filter(Boolean);
+    if (parts.length) {
+      return parts.join(" ");
+    }
+    return String(problem.message || problem.error || BUSY_MESSAGE);
+  }
+
+  function friendlyClientError(rawOrProblem) {
+    if (rawOrProblem && typeof rawOrProblem === "object") {
+      return formatProblem(rawOrProblem);
+    }
+    const text = String(rawOrProblem || "");
     if (
       /busy|not responding|RESOURCE_EXHAUSTED|UNAVAILABLE|429|503|quota|overloaded|timed out|timeout/i.test(
         text
       )
     ) {
-      return BUSY_MESSAGE;
+      return formatProblem({
+        code: "live_busy",
+        what: "Google Live is busy or not responding.",
+        why: "Gemini Live returned a temporary server or quota error.",
+        next: "Wait a minute and press Talk again, or type a city rain question — NASA POWER still works."
+      });
     }
     if (/API key|401|403|UNAUTHENTICATED|invalid/i.test(text)) {
-      return "Gemini API key is missing or invalid on this machine. Check .env and restart the server.";
+      return formatProblem({
+        code: "live_auth",
+        what: "Gemini API key is missing or invalid on this machine.",
+        why: "Live duplex needs a valid GEMINI_API_KEY in the project .env.",
+        next: "Fix .env and restart with: env -u GEMINI_API_KEY -u GOOGLE_API_KEY npm start"
+      });
     }
     return text || BUSY_MESSAGE;
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   function setTalkLiveUi(on) {
@@ -338,9 +371,14 @@
     if (typeof window.jukeboxPauseWake === "function") {
       window.jukeboxPauseWake();
     }
+    // Soft clear of speech/recognition without recursively killing Live mid-start.
     if (typeof window.jukeboxStopEverything === "function") {
       window.jukeboxStopEverything("Starting Talk (Live)…");
     }
+    // Give Chrome wake-word recognition time to release the microphone.
+    setProcessCue("connecting", "Releasing microphone for Live Talk…");
+    setStatus("Starting Talk (Live) — waiting for mic handoff…");
+    await delay(MIC_HANDOFF_MS);
 
     modelTranscript = "";
     setTalkLiveUi(true);
@@ -361,7 +399,12 @@
       ws = new WebSocket(`${proto}://${location.host}/api/live`);
 
       const failTimer = setTimeout(() => {
-        const message = BUSY_MESSAGE;
+        const message = formatProblem({
+          code: "live_timeout",
+          what: "Gemini Live did not become ready in time.",
+          why: "The WebSocket handshake or setup timed out (often Google busy, or mic still held by wake word).",
+          next: "Untick “Hey Jukebox”, press Talk again, or type your question."
+        });
         setProcessCue("error", message);
         stopLive(message);
         finish(false);
@@ -372,10 +415,17 @@
         setProcessCue("connecting", "Connected — starting microphone…");
         ws.send(JSON.stringify({ type: "start", language }));
         try {
+          await delay(250);
           await startCapture();
         } catch (error) {
           clearTimeout(failTimer);
-          stopLive(`Microphone blocked: ${error.message}`);
+          const message = formatProblem({
+            code: "mic_blocked",
+            what: "Could not open the microphone for Live Talk.",
+            why: error.message || "Browser blocked getUserMedia.",
+            next: "Allow mic for localhost, untick wake word if it is on, then press Talk again."
+          });
+          stopLive(message);
           finish(false);
         }
       };
@@ -458,7 +508,11 @@
         if (msg.type === "error") {
           clearTimeout(failTimer);
           clearAnswerWatchdog();
-          const message = friendlyClientError(msg.message);
+          const message = friendlyClientError(
+            msg.what || msg.why
+              ? msg
+              : msg.message
+          );
           setProcessCue("error", message);
           stopLive(message);
           finish(false);
@@ -467,7 +521,13 @@
         if (msg.type === "closed") {
           clearTimeout(failTimer);
           if (liveActive) {
-            stopLive("Talk Live closed.");
+            const message = formatProblem({
+              code: "live_closed",
+              what: "Talk Live closed unexpectedly.",
+              why: "Google closed the Live socket, or the mic handoff failed after wake word.",
+              next: "Press Talk again. If wake word is on, untick it once, then retry."
+            });
+            stopLive(message);
           }
           finish(false);
         }
@@ -475,7 +535,12 @@
 
       ws.onerror = () => {
         clearTimeout(failTimer);
-        const message = BUSY_MESSAGE;
+        const message = formatProblem({
+          code: "live_socket",
+          what: "Could not keep the Live Talk connection open.",
+          why: "The browser WebSocket to /api/live failed.",
+          next: "Confirm the server is running, then press Talk again or type a question."
+        });
         setProcessCue("error", message);
         stopLive(message);
         finish(false);
@@ -484,7 +549,14 @@
       ws.onclose = () => {
         clearTimeout(failTimer);
         if (liveActive) {
-          stopLive("Talk Live closed.");
+          stopLive(
+            formatProblem({
+              code: "live_closed",
+              what: "Talk Live closed.",
+              why: "The Live session ended before you pressed Stop.",
+              next: "Press Talk to start a new live session, or type your question."
+            })
+          );
         }
       };
     });

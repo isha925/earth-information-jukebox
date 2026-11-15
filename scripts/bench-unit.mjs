@@ -122,11 +122,35 @@ if (
   !/liveProcessCue/.test(liveClient) ||
   !/setProcessCue/.test(liveClient) ||
   !/BUSY_MESSAGE/.test(liveClient) ||
-  !/friendlyGoogleBusyMessage/.test(liveProxy)
+  !/friendlyGoogleBusyMessage/.test(liveProxy) ||
+  !/explainLiveProblem/.test(liveProxy) ||
+  !/sendLiveError/.test(liveProxy)
 ) {
   fail("live-process-cue", "processing banner / busy Google errors missing");
 } else {
-  ok("live-process-cue", "visual process cue + Google busy copy");
+  ok("live-process-cue", "visual process cue + structured Live errors");
+}
+
+const serverJs = fs.readFileSync(path.join(ROOT, "server.js"), "utf8");
+if (
+  !/function explainProblem/.test(serverJs) ||
+  !/function explainGeminiFailure/.test(serverJs) ||
+  !/texas:\s*\{\s*name:\s*"Austin"/.test(serverJs) ||
+  !/function showProblem/.test(appJs) ||
+  !/fromWake/.test(appJs) ||
+  !/wake_live_failed|do NOT fall into Chrome STT|Live Talk did not stay open/.test(appJs) ||
+  !/MIC_HANDOFF_MS/.test(liveClient) ||
+  !/releasing mic, then starting Talk/.test(wakeJs)
+) {
+  fail(
+    "core-reliability",
+    "what/why/next errors, Texas alias, wake→Live mic handoff, or no Chrome after wake missing"
+  );
+} else {
+  ok(
+    "core-reliability",
+    "Texas→Austin alias, structured errors, wake mic handoff, no Chrome after wake"
+  );
 }
 
 if (

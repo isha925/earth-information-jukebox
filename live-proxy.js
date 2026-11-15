@@ -23,23 +23,63 @@ function safeSend(ws, payload) {
   }
 }
 
-function friendlyGoogleBusyMessage(raw, statusCode) {
+function explainLiveProblem(raw, statusCode) {
   const text = String(raw || "");
   const code = Number(statusCode) || 0;
   if (
     code === 429 ||
+    /RESOURCE_EXHAUSTED|quota exceeded|rate limit/i.test(text)
+  ) {
+    return {
+      code: "live_quota",
+      what: "Gemini Live could not stay connected.",
+      why: "This Google Cloud project's free daily Gemini quota is used up (shared by every API key in the same project).",
+      next: "Type a city rain question (NASA still works), wait until midnight Pacific, or use a GEMINI_API_KEY from a different Google account/project and restart."
+    };
+  }
+  if (
     code === 503 ||
     code === 500 ||
-    /RESOURCE_EXHAUSTED|UNAVAILABLE|overloaded|high demand|quota|try again|deadline|timed out|timeout/i.test(
+    /UNAVAILABLE|overloaded|high demand|try again|deadline|timed out|timeout/i.test(
       text
     )
   ) {
-    return "Google's servers look busy or not responding. Try again in a few minutes.";
+    return {
+      code: "live_busy",
+      what: "Google Live is busy or not responding.",
+      why: "Gemini Live returned a temporary server error.",
+      next: "Wait a minute and press Talk again. Or type “rain in Tokyo” — NASA POWER answers without Live."
+    };
   }
   if (/401|403|API key|PERMISSION|UNAUTHENTICATED/i.test(text)) {
-    return "Gemini API key is missing or invalid on this machine. Check .env and restart the server.";
+    return {
+      code: "live_auth",
+      what: "Gemini Live rejected this project's API key.",
+      why: "The key is missing, invalid, or not allowed for Live audio.",
+      next: "Put a valid GEMINI_API_KEY in .env and restart with: env -u GEMINI_API_KEY -u GOOGLE_API_KEY npm start"
+    };
   }
-  return text || "Talk Live failed. Try again in a few minutes.";
+  const short = (text || "Talk Live failed.").slice(0, 180);
+  return {
+    code: "live_failed",
+    what: "Talk Live failed.",
+    why: short,
+    next: "Press Talk again, or type your question. If wake word is on, untick it once and retry Talk (mic handoff)."
+  };
+}
+
+function friendlyGoogleBusyMessage(raw, statusCode) {
+  const problem = explainLiveProblem(raw, statusCode);
+  return [problem.what, problem.why, problem.next].filter(Boolean).join(" ");
+}
+
+function sendLiveError(client, raw, statusCode) {
+  const problem = explainLiveProblem(raw, statusCode);
+  safeSend(client, {
+    type: "error",
+    message: [problem.what, problem.why, problem.next].filter(Boolean).join(" "),
+    ...problem
+  });
 }
 
 function attachLiveProxy(httpServer, deps) {
@@ -68,10 +108,11 @@ function attachLiveProxy(httpServer, deps) {
     };
 
     if (!apiKey) {
-      safeSend(client, {
-        type: "error",
-        message: "GEMINI_API_KEY is not configured for Live duplex."
-      });
+      sendLiveError(
+        client,
+        "GEMINI_API_KEY is not configured for Live duplex.",
+        401
+      );
       closeAll();
       return;
     }
@@ -150,13 +191,7 @@ function attachLiveProxy(httpServer, deps) {
 
         if (msg.error) {
           const code = msg.error.code || msg.error.status;
-          safeSend(client, {
-            type: "error",
-            message: friendlyGoogleBusyMessage(
-              msg.error.message || "Live API error",
-              code
-            )
-          });
+          sendLiveError(client, msg.error.message || "Live API error", code);
           return;
         }
 
@@ -284,21 +319,13 @@ function attachLiveProxy(httpServer, deps) {
           body += chunk;
         });
         res.on("end", () => {
-          safeSend(client, {
-            type: "error",
-            message: friendlyGoogleBusyMessage(body, res.statusCode)
-          });
+          sendLiveError(client, body, res.statusCode);
           closeAll();
         });
       });
 
       gemini.on("error", (error) => {
-        safeSend(client, {
-          type: "error",
-          message: friendlyGoogleBusyMessage(
-            error.message || "Live WebSocket error"
-          )
-        });
+        sendLiveError(client, error.message || "Live WebSocket error");
       });
 
       gemini.on("close", () => {

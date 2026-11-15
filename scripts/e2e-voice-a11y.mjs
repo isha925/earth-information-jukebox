@@ -255,6 +255,8 @@ async function main() {
     // Reset stub to English Kathmandu talk path
     await page.select("#replyLanguage", "auto");
     await page.evaluate(() => {
+      window.jukeboxLiveAvailable = async () => false;
+      window.jukeboxStartLiveTalk = async () => false;
       class StubRecognition {
         constructor() {
           this.lang = "en-US";
