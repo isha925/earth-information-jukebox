@@ -3,44 +3,101 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Earth Information Jukebox</title>
+  <title>Earth Information Jukebox — Hear any place through NASA data</title>
+  <meta name="description" content="NASA Space Apps 2026: ask any city — NASA POWER + EIC visuals sonify rainfall on the fly; GISTEMP for global warming.">
   <link rel="stylesheet" href="styles.css">
 </head>
-
 <body>
   <main class="earth-interface">
-
-    <!-- Moving Earth scene -->
-    <div class="earth-scene" aria-hidden="true"></div>
+    <div id="earthScene" class="earth-scene" role="img" aria-label="NASA Earth Information Center atmospheric river visualization"></div>
     <div class="scene-darkening" aria-hidden="true"></div>
+    <div class="scene-sheen" aria-hidden="true"></div>
 
-    <!-- Floating interface -->
     <section class="interface-content">
+      <header class="top-bar">
+        <div class="brand-block">
+          <p class="brand">Earth Information Jukebox</p>
+          <p class="brand-sub">NASA Space Apps 2026 · Ask any place · Hear Earth science</p>
+        </div>
+        <p class="source-pill">NASA SVS EIC · POWER · GISTEMP</p>
+      </header>
 
-      <p class="brand">EARTH INFORMATION JUKEBOX</p>
-
-      <div class="welcome-area">
+      <div class="hero-copy">
+        <p class="eyebrow">On-the-fly Earth listening</p>
         <h1>Listen to Earth.</h1>
+        <p class="problem">
+          Name a city — Tokyo, Miami, Pokhara, Kathmandu — and the jukebox geocodes it, pulls NASA POWER
+          for that point, and turns real precipitation into sound on an EIC science frame.
+          Zero millimeters means a dry cue, not fake rain.
+        </p>
+      </div>
 
-        <p id="paMessage">
-          Good morning, and welcome to Earth Information Jukebox.
-          I'm so glad you're here.
-          Please click “Talk with me” to begin our conversation.
+      <div class="stage">
+        <p id="trackLabel" class="track-label">EIC visual: Atmospheric river · SVS 4960</p>
+
+        <p id="paMessage" class="lead">
+          Ask rainfall for any place to hear NASA POWER precipitation.
+          Ask global temperature to hear GISTEMP as a rising tone.
         </p>
 
-        <button id="talkButton" type="button">
-          🎙 Talk with me
-        </button>
+        <div class="lang-row">
+          <label for="replyLanguage">Speak reply in</label>
+          <select id="replyLanguage" name="replyLanguage">
+            <option value="auto" selected>Auto (regional by place, else English)</option>
+            <option value="en-US">English</option>
+            <option value="ne-NP">Nepali</option>
+            <option value="hi-IN">Hindi</option>
+            <option value="ja-JP">Japanese</option>
+            <option value="ar-EG">Arabic</option>
+            <option value="es-ES">Spanish</option>
+            <option value="fr-FR">French</option>
+            <option value="pt-BR">Portuguese</option>
+            <option value="zh-CN">Chinese (Mandarin)</option>
+            <option value="sw-KE">Swahili</option>
+          </select>
+          <span id="voiceSupportNote" class="voice-note" aria-live="polite"></span>
+        </div>
+
+        <form id="askForm" class="ask-form">
+          <label class="sr-only" for="askInput">Ask the jukebox</label>
+          <input
+            id="askInput"
+            name="ask"
+            type="text"
+            autocomplete="off"
+            placeholder="Try: rain in Tokyo · Pokhara yesterday · Miami · global temperature"
+            required
+          >
+          <button id="askButton" type="submit">Ask</button>
+          <button id="talkButton" type="button">Talk</button>
+        </form>
+
+        <div class="quick-actions">
+          <button id="kathmanduBtn" type="button" data-question="Kathmandu rainfall">
+            Hear Kathmandu rain
+          </button>
+          <button id="tokyoBtn" type="button" data-question="rain in Tokyo">
+            Hear Tokyo rain
+          </button>
+          <button id="gistempBtn" type="button" data-question="global temperature">
+            Hear global warming tone
+          </button>
+          <button id="stopAudioBtn" type="button" class="ghost">
+            Stop sound
+          </button>
+        </div>
+
+        <div class="meter" aria-hidden="true">
+          <div class="meter-label">Sonification intensity</div>
+          <div class="meter-track">
+            <div id="intensityBar" class="meter-fill"></div>
+          </div>
+        </div>
 
         <p id="statusMessage" class="status" aria-live="polite"></p>
+        <div id="dataDisplay" class="data-display" aria-live="polite"></div>
+        <p id="citationLine" class="citation"></p>
       </div>
-
-      <!-- Small floating controls -->
-      <div class="floating-controls">
-        <button id="languageButton" type="button">🌐 Language</button>
-        <button id="locationButton" type="button">📍 Location</button>
-      </div>
-
     </section>
   </main>
 
